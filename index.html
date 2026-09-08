@@ -64,6 +64,12 @@ body.billopen .billtab{display:none;}
 h1{font-family:var(--disp);font-optical-sizing:auto;font-weight:900;font-size:clamp(30px,7vw,48px);line-height:.98;letter-spacing:-.02em;margin:8px 0 6px;}
 .chk-meta{font-family:var(--mono);font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 16px;border-top:1px dashed var(--line2);border-bottom:1px dashed var(--line2);padding:9px 0;margin-top:14px;}
 .chk-meta b{color:var(--ink);font-weight:600;} .grand{font-family:var(--disp);font-weight:900;}
+.topgrand{margin-top:12px;display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px 18px;border-top:1px dashed var(--line2);padding-top:12px;}
+.topgrand .tg-parts{display:flex;flex-wrap:wrap;gap:4px 16px;font-family:var(--mono);font-size:13px;color:var(--muted);}
+.topgrand .tg-parts b{color:var(--ink);font-weight:600;} .topgrand .tg-plus b{color:var(--accent);}
+.topgrand .tg-final{display:flex;flex-direction:column;align-items:flex-end;line-height:1;}
+.topgrand .tg-final .grand{font-family:var(--disp);font-weight:900;font-size:2.5rem;color:var(--ink);}
+.topgrand .tg-cap{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;margin-top:3px;}
 .theme{display:inline-flex;border:1.5px solid var(--line2);border-radius:10px;overflow:hidden;}
 .theme button{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding:8px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer;}
 .theme button.on{background:var(--ink);color:var(--bg);}
@@ -156,8 +162,9 @@ footer{margin-top:26px;font-family:var(--mono);font-size:11.5px;color:var(--fain
     <div class="chk-meta">
       <span>CHK <b>58927</b></span><span>TBL <b>51/3</b></span><span>DATE <b>9/4/2026</b></span>
       <span>SUBTOTAL <b>$353.50</b></span><span>SVC <b>$67.17</b></span><span>TAX <b>$44.38</b></span>
-      <span>TOTAL DUE <b class="grand">$465.05</b></span>
+      
     </div>
+    <div class="topgrand"><div class="tg-parts"><span>Fog Room <b>$465.05</b></span><span class="tg-plus">+ Shots <b>$46.89</b></span></div><div class="tg-final"><b class="grand">$511.94</b><span class="tg-cap">total incl. shots</span></div></div>
     <ul style="margin:14px 0 0;padding-left:20px;font-size:14.5px;color:var(--muted);max-width:64ch;line-height:1.7;">
       <li>Tick what <b style="color:var(--ink)">you</b> ordered.</li>
       <li>When you're done, hit <b style="color:var(--go)">✓ Done</b> under your name.</li>
@@ -166,7 +173,7 @@ footer{margin-top:26px;font-family:var(--mono);font-size:11.5px;color:var(--fain
     </ul>
   </div>
 
-  <div class="seeded" id="seeded" style="display:none;">✨ Seeded from Sam's best guess — this is just a starting point, and it clears the moment anyone makes a change.</div>
+  <div class="seeded" id="seeded" style="display:none;">✨ Seeded from an initial best guess — just a starting point; it clears the moment anyone makes a change.</div>
   <div class="sync"><span class="dot" id="syncdot"></span><span id="syncmsg">connecting…</span></div>
 
   <div class="seg" id="seg"><button data-v="assign" class="on">Assign</button><button data-v="totals">Totals</button></div>
@@ -188,42 +195,206 @@ footer{margin-top:26px;font-family:var(--mono);font-size:11.5px;color:var(--fain
 
 <script>
 "use strict";
-// ================= CONFIG =================
-const PEOPLE=["Sam","Robert","Wade","Josh","Pratik","Jonathan"];
-const PC=["#b5482f","#4a7c59","#c98a1e","#7048a0","#2f7d8a","#b02f6a"];
-const SERVICE=67.17, TAX=44.38, RECEIPT_SUBTOTAL=353.50;
-const SYNC_TOPIC="billsplit-58927-awreccan-9k3m2v";
-const NTFY="https://ntfy.sh/"+SYNC_TOPIC;
-const LS="billsplit-58927-v2fresh";
-const APP_VERSION="0.1.0";                 // dev build → routes telemetry to the v0.1.0 sheet
-const TRACK_URL="https://script.google.com/macros/s/AKfycbxlUa5-V5Um_AmlVxm0yQKaN-2XY4V9CjXUQL5foM2am7aEPzfXZjiCwfuvVKCEYf7X1Q/exec";  // Apps Script relay → Google Sheet (silent)
-const ITEMS=[
-  {id:1,name:"Candied Bacon",detail:"app",group:"Food",price:12.00},
-  {id:2,name:"Smash Burger",detail:"entrée",group:"Food",price:28.00},
-  {id:3,name:"Calamari",detail:"app",group:"Food",price:18.00},
-  {id:4,name:"Charter Board",detail:"charcuterie",group:"Food",price:28.00},
-  {id:5,name:"Oyster Rockefeller",detail:"app",group:"Food",price:26.00},
-  {id:6,name:"Empress · French 75",detail:"gin $15 + French 75 $5",group:"Drinks",price:20.00},
-  {id:7,name:"Last Light",detail:"cocktail",group:"Drinks",price:25.00},
-  {id:8,name:"Well Gin & tonic",detail:"gin $10 + tonic $1",group:"Drinks",price:11.00},
-  {id:9,name:"Bombay · Negroni",detail:"Bombay $12 + Negroni $4",group:"Drinks",price:16.00},
-  {id:10,name:"Espresso",detail:"coffee",group:"Drinks",price:4.50},
-  {id:11,name:"Mojito",detail:"cocktail",group:"Drinks",price:18.00},
-  {id:12,name:"Sunset Drift",detail:"cocktail",group:"Drinks",price:20.00},
-  {id:13,name:"Sunset Drift",detail:"cocktail",group:"Drinks",price:20.00},
-  {id:14,name:"Juniper Sun",detail:"cocktail",group:"Drinks",price:23.00},
-  {id:15,name:"Smoke Signal",detail:"cocktail",group:"Drinks",price:20.00},
-  {id:16,name:"Well Gin & tonic",detail:"gin $10 + tonic $1",group:"Drinks",price:11.00},
-  {id:17,name:"Well Gin & martini",detail:"gin $10 + martini $5",group:"Drinks",price:15.00},
-  {id:18,name:"Woodinville",detail:"whiskey sour $15 + egg $5",group:"Drinks",price:20.00},
-  {id:19,name:"Sazerac",detail:"",group:"Drinks",price:18.00},
-];
-const GROUPS=["Food","Drinks"];
-const GUESS={1:[0,1,2,3,4,5],2:[0],3:[0,1,2,3,4,5],4:[0,1,2,3,4,5],5:[0,1,2,3,4,5],6:[3],7:[1],8:[5],9:[1],10:[4],11:[2],12:[4],13:[5],14:[2],15:[3],16:[3],17:[0],18:[4],19:[5]};
-const money=n=>"$"+(Math.round(n*100)/100).toFixed(2);
-// row config: "solo" (radio-like: one owner) or "shared" (multi). Preset from current marks: >1 → shared, else solo.
-function getMode(id){if(!state.mode)state.mode={};return state.mode[id]||((state.marks[id]||[]).length>1?"shared":"solo");}
+// ===== ENGINE (from src/engine.mjs — single source of truth) =====
+// bill-splitter ENGINE — the reusable app logic. ZERO bill-specific data lives here;
+// everything bill-specific arrives as a `bill` config (the "content"). This module is the
+// spec surface: tests import it directly and pin its behaviour against any bill config.
+//
+// A `bill` config (the content) has shape:
+//   { title, people:[str], colors:[str], items:[{id,name,detail,group,price}], groups:[str],
+//     guess:{ itemId: [personIdx,...] }, service:num, tax:num, receiptSubtotal:num,
+//     meta:{check,table,date}, sync:{topic}, telemetry:{url,appVersion}, lsKey, image }
+//
+// A `state` is the live, syncable assignment:
+//   { version, updatedAt, updatedBy, seeded, prices:{id:num}, marks:{id:[personIdx]},
+//     signed:{personIdx:true}, mode:{id:"solo"|"shared"} }
+//
+// The engine holds the CURRENT bill + state in module scope (set once at startup, or by a
+// test) so the UI can call bare `subtotal()` etc. In the built single-file app this module is
+// inlined into the same <script> as the UI (its `export` keywords stripped), so `bill`/`state`
+// and every function share one scope and the UI reassigns `state` directly. In tests it is a
+// normal ESM module driven through setBill()/setState().
 
+let bill = null;
+let state = null;
+function setBill(b) { bill = b; }
+function getBill() { return bill; }
+function setState(s) { state = s; }
+function getState() { return state; }
+
+// format a number as a 2-decimal dollar string
+const money = n => "$" + (Math.round(n * 100) / 100).toFixed(2);
+
+// a fresh state: every item unassigned, prices seeded from the menu
+function emptyState() {
+  const marks = {}, prices = {}, extraMarks = {};
+  bill.items.forEach(it => { marks[it.id] = []; prices[it.id] = it.price; });
+  (bill.extras || []).forEach(e => { extraMarks[e.id] = []; });
+  return { version: 0, updatedAt: 0, updatedBy: "", seeded: false, prices, marks, signed: {}, mode: {}, extraMarks };
+}
+
+// a seeded state: marks pre-filled from the bill's built-in GUESS assignment
+function guessState() {
+  const s = emptyState();
+  bill.items.forEach(it => { s.marks[it.id] = (bill.guess[it.id] || []).slice(); });
+  (bill.extras || []).forEach(e => { s.extraMarks[e.id] = ((bill.extrasGuess || {})[e.id] || []).slice(); });
+  s.seeded = true;
+  s.updatedBy = "(seed)";
+  return s;
+}
+
+// repair a loaded/synced state: bad prices → menu price, non-array marks → [], fill defaults
+function normalize(raw) {
+  const r = raw || {};
+  r.prices = r.prices || {};
+  r.marks = r.marks || {};
+  bill.items.forEach(it => {
+    if (typeof r.prices[it.id] !== "number" || isNaN(r.prices[it.id])) r.prices[it.id] = it.price;
+    if (!Array.isArray(r.marks[it.id])) r.marks[it.id] = [];
+  });
+  r.signed = r.signed || {};
+  r.mode = r.mode || {};
+  r.extraMarks = r.extraMarks || {};
+  (bill.extras || []).forEach(e => { if (!Array.isArray(r.extraMarks[e.id])) r.extraMarks[e.id] = []; });
+  r.version = r.version || 0;
+  r.updatedAt = r.updatedAt || 0;
+  r.updatedBy = r.updatedBy || "";
+  r.seeded = !!r.seeded;
+  return r;
+}
+
+// sum of all item prices (the check subtotal, before service + tax)
+function subtotal() {
+  return bill.items.reduce((s, it) => s + (state.prices[it.id] || 0), 0);
+}
+
+// per-person item subtotal (an item split evenly among everyone who ticked it), plus the
+// unclaimed remainder (items nobody ticked).
+function personSubs() {
+  const sub = bill.people.map(() => 0);
+  let un = 0;
+  bill.items.forEach(it => {
+    const who = state.marks[it.id] || [];
+    const price = state.prices[it.id] || 0;
+    if (!who.length) { un += price; return; }
+    const share = price / who.length;
+    who.forEach(i => { sub[i] += share; });
+  });
+  return { sub, un };
+}
+
+// each person's total = their items + a proportional slice of service+tax (by item share).
+// With no items assigned at all, the fee lands entirely on the unclaimed bucket.
+function owed() {
+  const { sub, un } = personSubs();
+  const t = subtotal();
+  const fee = bill.service + bill.tax;
+  let o, uo;
+  if (t > 0) { o = sub.map(s => s + fee * (s / t)); uo = un + fee * (un / t); }
+  else { o = sub.map(() => 0); uo = 0; }
+  return { sub, o, un, uo };
+}
+
+// largest-remainder penny reconciliation: round `vals` (dollars) so the cents sum EXACTLY to
+// `targetCents`, handing leftover/short pennies to the largest/smallest fractional parts.
+function roundToSum(vals, targetCents) {
+  const c = vals.map(x => Math.floor(x * 100 + 1e-6));
+  let rem = targetCents - c.reduce((a, b) => a + b, 0);
+  const q = vals.map((x, i) => ({ i, f: x * 100 - Math.floor(x * 100 + 1e-6) })).sort((a, b) => b.f - a.f);
+  for (let k = 0; k < q.length && rem > 0; k++) { c[q[k].i]++; rem--; }
+  for (let k = q.length - 1; k >= 0 && rem < 0; k--) { if (c[q[k].i] > 0) { c[q[k].i]--; rem++; } }
+  return c.map(x => x / 100);
+}
+
+// a row is "solo" (one owner, checkboxes behave radio-like) or "shared" (split among all ticked).
+// Default derives from the current marks (>1 → shared, else solo); an explicit override wins.
+function getMode(id) {
+  if (!state.mode) state.mode = {};
+  return state.mode[id] || ((state.marks[id] || []).length > 1 ? "shared" : "solo");
+}
+
+// is this person's checkbox on this item frozen? True if that person has signed off, OR the row
+// is solo and its current owner has signed off (so the whole solo row locks).
+function isCellLocked(itemId, personIdx) {
+  const who = state.marks[itemId] || [];
+  const soloLocked = getMode(itemId) === "solo" && who.some(j => state.signed[j]);
+  return !!state.signed[personIdx] || soloLocked;
+}
+
+// compute the new marks array for an item after a person ticks/unticks their box. Preserves the
+// marks of anyone already signed off; solo rows behave radio-like (one un-signed owner at a time);
+// result is de-duplicated and sorted. Pure: returns the array, does not mutate state.
+function applyMark(itemId, personIdx, checked) {
+  const a = state.marks[itemId] || [];
+  const solo = getMode(itemId) === "solo";
+  const signedOn = a.filter(j => state.signed[j]);
+  let uns = a.filter(j => !state.signed[j]);
+  if (checked) uns = solo ? [personIdx] : (uns.includes(personIdx) ? uns : uns.concat(personIdx));
+  else uns = uns.filter(x => x !== personIdx);
+  return [...new Set(signedOn.concat(uns))].sort((x, y) => x - y);
+}
+
+// each person's share of the items as a fraction of the subtotal (used for the tax & tip %s)
+function proportions() {
+  const { sub } = personSubs();
+  const t = subtotal();
+  return bill.people.map((_, i) => (t > 0 ? sub[i] / t : 0));
+}
+
+// ---- EXTRAS: separate-venue charges, split at FACE VALUE (no service/tax), shown in their own
+// section after tax & tip. bill.extras = [{id,name,venue,price}]; state.extraMarks = {id:[personIdx]}.
+// These are added to person totals directly and to the grand total, but NOT to the restaurant
+// subtotal (which still reconciles to the printed check).
+
+// sum of all extras' prices (added to the grand total; independent of who is assigned)
+function extrasTotal() {
+  return (bill.extras || []).reduce((s, e) => s + (e.price || 0), 0);
+}
+
+// per-person face-value share of the extras they are marked on (an extra split evenly among its markers)
+function extrasPerPerson() {
+  const sub = bill.people.map(() => 0);
+  (bill.extras || []).forEach(e => {
+    const who = (state.extraMarks && state.extraMarks[e.id]) || [];
+    if (!who.length) return;
+    const share = (e.price || 0) / who.length;
+    who.forEach(i => { sub[i] += share; });
+  });
+  return sub;
+}
+
+// total of extras nobody has ticked yet (the unclaimed extras bucket)
+function extrasUnclaimed() {
+  return (bill.extras || []).reduce((s, e) => {
+    const who = (state.extraMarks && state.extraMarks[e.id]) || [];
+    return s + (who.length ? 0 : (e.price || 0));
+  }, 0);
+}
+
+// extras are always shared (no solo mode); a person's extra cell is frozen only by their OWN sign-off
+function isExtraCellLocked(_extraId, personIdx) {
+  return !!state.signed[personIdx];
+}
+
+// new marks for an extra after a tick/untick — additive, de-duped, sorted, signed markers preserved
+function applyExtraMark(extraId, personIdx, checked) {
+  const a = (state.extraMarks && state.extraMarks[extraId]) || [];
+  const signedOn = a.filter(j => state.signed[j]);
+  let uns = a.filter(j => !state.signed[j]);
+  if (checked) uns = uns.includes(personIdx) ? uns : uns.concat(personIdx);
+  else uns = uns.filter(x => x !== personIdx);
+  return [...new Set(signedOn.concat(uns))].sort((x, y) => x - y);
+}
+
+// ===== CONTENT (this bill) — the ONLY bill-specific data =====
+const BILL={"slug":"robert-smart-bday","title":"Table 51/3 — Split the Bill","meta":{"check":"58927","table":"51/3","date":"9/4/2026"},"people":["Sam","Robert","Wade","Josh","Pratik","Jonathan"],"colors":["#b5482f","#4a7c59","#c98a1e","#7048a0","#2f7d8a","#b02f6a"],"items":[{"id":1,"name":"Candied Bacon","detail":"app","group":"Food","price":12},{"id":2,"name":"Smash Burger","detail":"entrée","group":"Food","price":28},{"id":3,"name":"Calamari","detail":"app","group":"Food","price":18},{"id":4,"name":"Charter Board","detail":"charcuterie","group":"Food","price":28},{"id":5,"name":"Oyster Rockefeller","detail":"app","group":"Food","price":26},{"id":6,"name":"Empress · French 75","detail":"gin $15 + French 75 $5","group":"Drinks","price":20},{"id":7,"name":"Last Light","detail":"cocktail","group":"Drinks","price":25},{"id":8,"name":"Well Gin & tonic","detail":"gin $10 + tonic $1","group":"Drinks","price":11},{"id":9,"name":"Bombay · Negroni","detail":"Bombay $12 + Negroni $4","group":"Drinks","price":16},{"id":10,"name":"Espresso","detail":"coffee","group":"Drinks","price":4.5},{"id":11,"name":"Mojito","detail":"cocktail","group":"Drinks","price":18},{"id":12,"name":"Sunset Drift","detail":"cocktail","group":"Drinks","price":20},{"id":13,"name":"Sunset Drift","detail":"cocktail","group":"Drinks","price":20},{"id":14,"name":"Juniper Sun","detail":"cocktail","group":"Drinks","price":23},{"id":15,"name":"Smoke Signal","detail":"cocktail","group":"Drinks","price":20},{"id":16,"name":"Well Gin & tonic","detail":"gin $10 + tonic $1","group":"Drinks","price":11},{"id":17,"name":"Well Gin & martini","detail":"gin $10 + martini $5","group":"Drinks","price":15},{"id":18,"name":"Woodinville","detail":"whiskey sour $15 + egg $5","group":"Drinks","price":20},{"id":19,"name":"Sazerac","detail":"","group":"Drinks","price":18}],"groups":["Food","Drinks"],"guess":{"1":[0,1,2,3,4,5],"2":[0],"3":[0,1,2,3,4,5],"4":[0,1,2,3,4,5],"5":[0,1,2,3,4,5],"6":[3],"7":[1],"8":[5],"9":[1],"10":[4],"11":[2],"12":[4],"13":[5],"14":[2],"15":[3],"16":[3],"17":[0],"18":[4],"19":[5]},"service":67.17,"tax":44.38,"receiptSubtotal":353.5,"sync":{"topic":"billsplit-58927-awreccan-9k3m2v"},"telemetry":{"url":"https://script.google.com/macros/s/AKfycbxlUa5-V5Um_AmlVxm0yQKaN-2XY4V9CjXUQL5foM2am7aEPzfXZjiCwfuvVKCEYf7X1Q/exec","appVersion":"0.1.0"},"lsKey":"billsplit-58927-v2fresh","venue":"Fog Room","extras":[{"id":"e1","name":"Shots","venue":"Still Liquor","price":46.89}],"extrasGuess":{"e1":[0,2,3,4]},"image":"robert-smart-bday.image.txt"};
+setBill(BILL);
+const PEOPLE=BILL.people, PC=BILL.colors, ITEMS=BILL.items, GROUPS=BILL.groups, GUESS=BILL.guess;
+const SERVICE=BILL.service, TAX=BILL.tax, RECEIPT_SUBTOTAL=BILL.receiptSubtotal;
+const SYNC_TOPIC=BILL.sync.topic, NTFY="https://ntfy.sh/"+SYNC_TOPIC, LS=BILL.lsKey;
+const APP_VERSION=BILL.telemetry.appVersion, TRACK_URL=BILL.telemetry.url;
+const EXTRAS=BILL.extras||[];
+const VENUE=BILL.venue||"";
 // ================= TELEMETRY (silent) → Google Sheet via Apps Script relay =================
 let _ip="";
 (async()=>{ try{ _ip=(await(await fetch("https://api.ipify.org?format=json",{cache:"no-store"})).json()).ip; }catch(_){}
@@ -236,21 +407,10 @@ function track(action,extra){ if(!TRACK_URL||TRACK_URL.indexOf("__")===0) return
   }catch(_){}
 }
 
-// ================= STATE =================
-function emptyState(){const m={};ITEMS.forEach(it=>m[it.id]=[]);const pr={};ITEMS.forEach(it=>pr[it.id]=it.price);
-  return{version:0,updatedAt:0,updatedBy:"",seeded:false,prices:pr,marks:m,signed:{}};}
-function guessState(){const s=emptyState();ITEMS.forEach(it=>s.marks[it.id]=(GUESS[it.id]||[]).slice());s.seeded=true;s.updatedBy="(seed)";return s;}
-function normalize(r){ITEMS.forEach(it=>{if(typeof r.prices[it.id]!=="number"||isNaN(r.prices[it.id]))r.prices[it.id]=it.price;if(!Array.isArray(r.marks[it.id]))r.marks[it.id]=[];});
-  r.signed=r.signed||{};r.version=r.version||0;r.updatedAt=r.updatedAt||0;r.updatedBy=r.updatedBy||"";r.seeded=!!r.seeded;return r;}
-let state=(function(){try{const r=JSON.parse(localStorage.getItem(LS));if(r&&r.marks&&r.prices)return normalize(r);}catch(e){}return guessState();})();
+// ================= STATE (init from localStorage, else seed) =================
+state=(function(){try{const r=JSON.parse(localStorage.getItem(LS));if(r&&r.marks&&r.prices)return normalize(r);}catch(e){}return guessState();})();
 let collapsed={};
 function saveLocal(){try{localStorage.setItem(LS,JSON.stringify(state));}catch(e){}}
-
-// ================= COMPUTE =================
-function subtotal(){return ITEMS.reduce((s,it)=>s+(state.prices[it.id]||0),0);}
-function personSubs(){const sub=PEOPLE.map(()=>0);let un=0;ITEMS.forEach(it=>{const w=state.marks[it.id]||[];const p=state.prices[it.id]||0;if(!w.length){un+=p;return;}const sh=p/w.length;w.forEach(i=>sub[i]+=sh);});return{sub,un};}
-function owed(){const{sub,un}=personSubs();const t=subtotal();const fee=SERVICE+TAX;let o,uo;if(t>0){o=sub.map(s=>s+fee*(s/t));uo=un+fee*(un/t);}else{o=sub.map(()=>fee/PEOPLE.length);uo=0;}return{sub,o,un,uo};}
-function roundToSum(v,t){const c=v.map(x=>Math.floor(x*100+1e-6));let rem=t-c.reduce((a,b)=>a+b,0);const q=v.map((x,i)=>({i,f:x*100-Math.floor(x*100+1e-6)})).sort((a,b)=>b.f-a.f);for(let k=0;k<q.length&&rem>0;k++){c[q[k].i]++;rem--;}for(let k=q.length-1;k>=0&&rem<0;k--){if(c[q[k].i]>0){c[q[k].i]--;rem++;}}return c.map(x=>x/100);}
 
 // ================= MUTATION =================
 function mutate(fn,label){fn();state.version=(state.version||0)+1;state.updatedAt=Date.now();state.updatedBy="someone";
@@ -261,19 +421,25 @@ function renderSeeded(){document.getElementById("seeded").style.display=state.se
 function renderRecon(){const sub=subtotal();const el=document.getElementById("recon");const d=sub-RECEIPT_SUBTOTAL;
   if(Math.abs(d)<0.005){el.className="recon ok";el.textContent=`✓ items ${money(sub)} · +svc ${money(SERVICE)} +tax ${money(TAX)} = ${money(sub+SERVICE+TAX)} (matches the check)`;}
   else{el.className="recon bad";el.textContent=`⚠ item prices total ${money(sub)} — ${d>0?"over":"under"} the printed $353.50 by ${money(Math.abs(d))}`;}}
+function extrasVenueLabel(){if(typeof EXTRAS==="undefined"||!EXTRAS||!EXTRAS.length)return"Other venue";return (EXTRAS.every(e=>e.venue===EXTRAS[0].venue)&&EXTRAS[0].venue)?EXTRAS[0].venue:"Other venue";}
 function renderTable(){
   const thead=document.querySelector("#tbl thead");const tbody=document.querySelector("#tbl tbody");
   const {sub,o,un,uo}=owed();const totSub=subtotal();
   const owedD=roundToSum([...o,uo],Math.round((totSub+SERVICE+TAX)*100));
   const props=PEOPLE.map((_,i)=> totSub>0 ? sub[i]/totSub : 0);
+  // per-person column total must include each person's extras (separate-venue) share
+  const eTotH=(typeof extrasTotal!=="undefined")?extrasTotal():0;
+  const eShareH=(typeof extrasPerPerson!=="undefined")?extrasPerPerson():PEOPLE.map(()=>0);
+  const eUnH=(typeof extrasUnclaimed!=="undefined")?extrasUnclaimed():0;
+  const eDH=eTotH>0.005?roundToSum([...eShareH,eUnH],Math.round(eTotH*100)):PEOPLE.map(()=>0).concat(0);
   let h=`<tr><th class="itemhd"><div class="hdinner">Item</div></th><th class="pricehd"><div class="hdinner">Price</div></th><th class="typehd"><div class="hdinner">Type</div></th>`;
-  PEOPLE.forEach((p,i)=>{const s=!!state.signed[i];h+=`<th class="person"><div class="hdinner"><span class="ptot">${money(owedD[i])}</span><span class="pname"><span class="pdot" style="background:${PC[i]}"></span>${p}</span><label class="signoff${s?' signed':''}" data-sign="${i}"><input type="checkbox" ${s?'checked':''}>${s?'signed':'✓ done'}</label></div></th>`;});
+  PEOPLE.forEach((p,i)=>{const s=!!state.signed[i];h+=`<th class="person"><div class="hdinner"><span class="ptot">${money(owedD[i]+eDH[i])}</span><span class="pname"><span class="pdot" style="background:${PC[i]}"></span>${p}</span><label class="signoff${s?' signed':''}" data-sign="${i}"><input type="checkbox" ${s?'checked':''}>${s?'signed':'✓ done'}</label></div></th>`;});
   thead.innerHTML=h+`</tr>`;
   const ncols=3+PEOPLE.length;tbody.innerHTML="";
   GROUPS.forEach(g=>{const items=ITEMS.filter(it=>it.group===g);if(!items.length)return;
     const gsum=items.reduce((s,it)=>s+(state.prices[it.id]||0),0);const col=!!collapsed[g];
     const gr=document.createElement("tr");gr.className="grouprow"+(col?" collapsed":"");
-    gr.innerHTML=`<td colspan="${ncols}"><div class="gi"><span class="caret">▾</span>${g}<span class="gmeta">· ${items.length} items · ${money(gsum)}</span></div></td>`;
+    gr.innerHTML=`<td colspan="${ncols}"><div class="gi"><span class="caret">▾</span>${(typeof VENUE!=="undefined"&&VENUE)?VENUE+" · ":""}${g}<span class="gmeta">· ${items.length} items · ${money(gsum)}</span></div></td>`;
     gr.querySelector(".gi").addEventListener("click",()=>{collapsed[g]=!collapsed[g];renderTable();});
     tbody.appendChild(gr);if(col)return;
     items.forEach(it=>{const w=state.marks[it.id]||[];const mode=getMode(it.id);const tr=document.createElement("tr");const n=w.length;
@@ -288,12 +454,9 @@ function renderTable(){
       tb.addEventListener("click",()=>mutate(()=>{if(!state.mode)state.mode={};state.mode[it.id]=(getMode(it.id)==="solo")?"shared":"solo";},"mode:"+it.id));
       t3.appendChild(tb);
       tr.appendChild(t1);tr.appendChild(t2);tr.appendChild(t3);
-      const soloLocked=(mode==="solo")&&w.some(j=>state.signed[j]);
-      PEOPLE.forEach((p,i)=>{const lock=!!state.signed[i]||soloLocked;const td=document.createElement("td");td.className="chk"+(lock?" frozen":"");const cb=document.createElement("input");cb.type="checkbox";cb.className="cb";cb.checked=w.includes(i);cb.disabled=lock;
-        cb.addEventListener("change",()=>mutate(()=>{let a=state.marks[it.id]||[];const solo=getMode(it.id)==="solo";
-          const signedOn=a.filter(j=>state.signed[j]);let uns=a.filter(j=>!state.signed[j]);
-          if(cb.checked){uns=solo?[i]:(uns.includes(i)?uns:uns.concat(i));}else{uns=uns.filter(x=>x!==i);}
-          a=[...new Set(signedOn.concat(uns))].sort((x,y)=>x-y);state.marks[it.id]=a;},"mark:"+it.id+":"+p));
+      
+      PEOPLE.forEach((p,i)=>{const lock=isCellLocked(it.id,i);const td=document.createElement("td");td.className="chk"+(lock?" frozen":"");const cb=document.createElement("input");cb.type="checkbox";cb.className="cb";cb.checked=w.includes(i);cb.disabled=lock;
+        cb.addEventListener("change",()=>mutate(()=>{state.marks[it.id]=applyMark(it.id,i,cb.checked);},"mark:"+it.id+":"+p));
         td.appendChild(cb);tr.appendChild(td);});
       tbody.appendChild(tr);});
   });
@@ -316,17 +479,39 @@ function renderTable(){
         tr.appendChild(td);});
       tbody.appendChild(tr);});
   })();
+  // Extras — separate-venue charges, split at FACE VALUE (no svc/tax), assignable checkboxes. Own section after tax & tip.
+  if(typeof EXTRAS!=="undefined"&&EXTRAS&&EXTRAS.length){
+    const evl=extrasVenueLabel();const ekey="extras:"+evl;const ecol=!!collapsed[ekey];
+    const egr=document.createElement("tr");egr.className="grouprow"+(ecol?" collapsed":"");
+    egr.innerHTML=`<td colspan="${ncols}"><div class="gi"><span class="caret">▾</span>${evl}<span class="gmeta">· split at cost · no tax/tip · ${money(extrasTotal())}</span></div></td>`;
+    egr.querySelector(".gi").addEventListener("click",()=>{collapsed[ekey]=!collapsed[ekey];renderTable();});
+    tbody.appendChild(egr);
+    if(!ecol)EXTRAS.forEach(e=>{const w=(state.extraMarks&&state.extraMarks[e.id])||[];const tr=document.createElement("tr");const n=w.length;
+      const t1=document.createElement("td");t1.className="item";t1.innerHTML=`<div class="ii"><div class="iname">${e.name}</div>${e.detail?`<div class="idetail">${e.detail}</div>`:""}</div>`;
+      const t2=document.createElement("td");t2.className="price";t2.innerHTML=`<div style="font-family:var(--mono);font-weight:600;padding:6px 7px;">${money(e.price)}</div>`+(n>1?`<div class="splitnote">÷${n} = ${money(e.price/n)}</div>`:"");
+      const t3=document.createElement("td");t3.className="type";t3.innerHTML='<span style="color:var(--faint)">—</span>';
+      tr.appendChild(t1);tr.appendChild(t2);tr.appendChild(t3);
+      PEOPLE.forEach((p,i)=>{const lock=isExtraCellLocked(e.id,i);const td=document.createElement("td");td.className="chk"+(lock?" frozen":"");const cb=document.createElement("input");cb.type="checkbox";cb.className="cb";cb.checked=w.includes(i);cb.disabled=lock;
+        cb.addEventListener("change",()=>mutate(()=>{state.extraMarks[e.id]=applyExtraMark(e.id,i,cb.checked);},"extra:"+e.id+":"+p));
+        td.appendChild(cb);tr.appendChild(td);});
+      tbody.appendChild(tr);});
+  }
   thead.querySelectorAll("[data-sign]").forEach(el=>el.addEventListener("click",e=>{e.preventDefault();const i=+el.dataset.sign;mutate(()=>{state.signed[i]=!state.signed[i];},"signoff:"+PEOPLE[i]);}));
   requestAnimationFrame(()=>{const hh=thead.getBoundingClientRect().height;document.documentElement.style.setProperty('--hdh',(hh-1)+'px');});
 }
 function renderTotals(){const{sub,o,un,uo}=owed();const gC=Math.round((subtotal()+SERVICE+TAX)*100);const sC=Math.round(subtotal()*100);
   const oD=roundToSum([...o,uo],gC);const sD=roundToSum([...sub,un],sC);
+  const eTot=(typeof extrasTotal!=="undefined")?extrasTotal():0;
+  const eShare=(typeof extrasPerPerson!=="undefined")?extrasPerPerson():PEOPLE.map(()=>0);
+  const eUn=(typeof extrasUnclaimed!=="undefined")?extrasUnclaimed():0;
+  const eD=eTot>0.005?roundToSum([...eShare,eUn],Math.round(eTot*100)):PEOPLE.map(()=>0).concat(0);
   document.getElementById("totbar").innerHTML=`<span>Assigned <b>${money(sD.slice(0,6).reduce((a,b)=>a+b,0))}</b> of ${money(RECEIPT_SUBTOTAL)}</span>`+
-    (un>0.005?`<span style="color:var(--warn)">Unclaimed <b>${money(sD[6])}</b></span>`:`<span style="color:var(--go)">Everything claimed ✓</span>`)+`<span>Grand total <b>${money(subtotal()+SERVICE+TAX)}</b></span>`;
+    (un>0.005?`<span style="color:var(--warn)">Unclaimed <b>${money(sD[6])}</b></span>`:`<span style="color:var(--go)">Everything claimed ✓</span>`)+(eTot>0.005?`<span>${extrasVenueLabel()} <b>${money(eTot)}</b></span>`:``)+`<span>Grand total <b>${money(subtotal()+SERVICE+TAX+eTot)}</b></span>`;
   const host=document.getElementById("people");host.innerHTML="";
   PEOPLE.forEach((p,i)=>{const its=ITEMS.filter(it=>(state.marks[it.id]||[]).includes(i)).map(it=>{const n=(state.marks[it.id]||[]).length;return{t:it.name+(n>1?` ÷${n}`:""),v:(state.prices[it.id]||0)/n};});
-    const fee=oD[i]-sD[i];const c=document.createElement("div");c.className="pcard";c.style.setProperty("--pc",PC[i]);
-    c.innerHTML=`<h3><span style="color:${PC[i]}">●</span>${p} ${state.signed[i]?'<span class="badge">signed ✓</span>':''}</h3><div class="amt">${money(oD[i])}</div><div class="sub">items ${money(sD[i])} + svc/tax ${money(fee)}</div><ul>${its.length?its.map(x=>`<li><span>${x.t}</span><span class="v">${money(x.v)}</span></li>`).join(""):'<li class="none">nothing ticked yet</li>'}</ul>`;
+    const eits=(typeof EXTRAS!=="undefined"&&EXTRAS?EXTRAS:[]).filter(e=>((state.extraMarks&&state.extraMarks[e.id])||[]).includes(i)).map(e=>{const n=((state.extraMarks&&state.extraMarks[e.id])||[]).length;return{t:e.name+(n>1?` ÷${n}`:""),v:(e.price||0)/n};});
+    const all=its.concat(eits);const fee=oD[i]-sD[i];const tot=oD[i]+eD[i];const c=document.createElement("div");c.className="pcard";c.style.setProperty("--pc",PC[i]);
+    c.innerHTML=`<h3><span style="color:${PC[i]}">●</span>${p} ${state.signed[i]?'<span class="badge">signed ✓</span>':''}</h3><div class="amt">${money(tot)}</div><div class="sub">items ${money(sD[i])} + svc/tax ${money(fee)}${eD[i]>0.005?` + ${extrasVenueLabel()} ${money(eD[i])}`:""}</div><ul>${all.length?all.map(x=>`<li><span>${x.t}</span><span class="v">${money(x.v)}</span></li>`).join(""):'<li class="none">nothing ticked yet</li>'}</ul>`;
     host.appendChild(c);});
   if(un>0.005){const its=ITEMS.filter(it=>!(state.marks[it.id]||[]).length);const c=document.createElement("div");c.className="pcard";c.style.setProperty("--pc","var(--warn)");
     c.innerHTML=`<h3 style="color:var(--warn)">Unclaimed</h3><div class="amt" style="color:var(--warn)">${money(oD[6])}</div><div class="sub">tick these so they land on someone</div><ul>${its.map(it=>`<li><span>${it.name}</span><span class="v">${money(state.prices[it.id]||0)}</span></li>`).join("")}</ul>`;host.appendChild(c);}
