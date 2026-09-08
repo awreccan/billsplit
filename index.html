@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- bill-splitter APP SHELL — build input for build.mjs; not runnable standalone (engine + bill content are injected at build). -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -191,105 +192,180 @@ footer{margin-top:26px;font-family:var(--mono);font-size:11.5px;color:var(--fain
 <script>
 "use strict";
 // ===== ENGINE (from src/engine.mjs — single source of truth) =====
-// bill-splitter ENGINE — the reusable app logic. ZERO bill-specific data lives here;
-// everything bill-specific arrives as a `bill` config (the "content"). This module is the
-// spec surface: tests import it directly and pin its behaviour against any bill config.
+// bill-splitter ENGINE — the reusable app logic. ZERO bill-specific data lives here; everything
+// bill-specific arrives as a `bill` config (the "content"). This module is the spec surface: the
+// tests import it directly and pin its behaviour against any bill config.
 //
-// A `bill` config (the content) has shape:
-//   { title, people:[str], colors:[str], items:[{id,name,detail,group,price}], groups:[str],
-//     guess:{ itemId: [personIdx,...] }, service:num, tax:num, receiptSubtotal:num,
-//     meta:{check,table,date}, sync:{topic}, telemetry:{url,appVersion}, lsKey, image }
+// A SPLIT is one or more BILLS paid by one group of people. Two kinds of bill:
+//   itemized — a printed check with line items. Each item needs a TYPE (solo/shared) and the PERSONS
+//              who had it (that crowdsourcing is the point of the app). Service + tax are split in
+//              proportion to each person's item share OF THAT BILL.
+//   lump     — a single-number charge from another business (a taxi ride, a round of shots) that only
+//              needs the persons who share it. Split at face value; no service/tax.
 //
-// A `state` is the live, syncable assignment:
-//   { version, updatedAt, updatedBy, seeded, prices:{id:num}, marks:{id:[personIdx]},
-//     signed:{personIdx:true}, mode:{id:"solo"|"shared"} }
+// Canonical config:
+//   { title, people:[str], colors:[str], sync:{topic}, telemetry:{url,appVersion}, lsKey,
+//     bills:[
+//       { id, kind:"itemized", venue, venueShort, items:[{id,name,detail,group,price}], groups:[str],
+//         guess:{ itemId:[personIdx] }, service, tax, receiptSubtotal, meta:{check,table,date}, image },
+//       { id, kind:"lump", venue, venueShort, name, detail, price, guess:[personIdx] } ] }
+// Legacy config (one itemized bill at top level: items/groups/guess/service/tax/receiptSubtotal/venue/
+// meta/image, plus optional extras:[{id,name,detail,venue,price}] + extrasGuess:{id:[idx]}) is accepted
+// and converted by normalizeBillConfig(). Item ids must be unique across ALL itemized bills.
 //
-// The engine holds the CURRENT bill + state in module scope (set once at startup, or by a
-// test) so the UI can call bare `subtotal()` etc. In the built single-file app this module is
-// inlined into the same <script> as the UI (its `export` keywords stripped), so `bill`/`state`
-// and every function share one scope and the UI reassigns `state` directly. In tests it is a
-// normal ESM module driven through setBill()/setState().
+// A `state` is the live, syncable assignment (schema shared by every client, so it never changes shape):
+//   { version, updatedAt, updatedBy, seeded, prices:{itemId:num}, marks:{itemId:[personIdx]},
+//     signed:{personIdx:true}, mode:{itemId:"solo"|"shared"}, extraMarks:{lumpId:[personIdx]} }
+//
+// The engine holds the CURRENT bill + state in module scope. In the built single-file app this module
+// is inlined into the same <script> as the UI (exports stripped); in tests it is a normal ESM module
+// driven through setBill()/setState().
 
 let bill = null;
 let state = null;
-function setBill(b) { bill = b; }
+function setBill(b) { bill = normalizeBillConfig(b); }
 function getBill() { return bill; }
 function setState(s) { state = s; }
 function getState() { return state; }
 
 // format a number as a 2-decimal dollar string
 const money = n => "$" + (Math.round(n * 100) / 100).toFixed(2);
+const cents = n => Math.round(n * 100);
+const zeros = () => bill.people.map(() => 0);
 
-// a fresh state: every item unassigned, prices seeded from the menu
+// ================= CONFIG =================
+
+// accept canonical or legacy config; return canonical + derived legacy views (items, extras, …)
+function normalizeBillConfig(raw) {
+  const r = raw || {};
+  let bills;
+  if (Array.isArray(r.bills)) {
+    bills = r.bills.map((b, i) => ({ ...b, id: b.id != null ? String(b.id) : "b" + i,
+      kind: b.kind || (Array.isArray(b.items) ? "itemized" : "lump") }));
+  } else {
+    bills = [];
+    if (Array.isArray(r.items)) bills.push({ id: r.billId != null ? String(r.billId) : "main", kind: "itemized",
+      venue: r.venue || "", venueShort: r.venueShort || "", items: r.items, groups: r.groups, guess: r.guess,
+      service: r.service, tax: r.tax, receiptSubtotal: r.receiptSubtotal, meta: r.meta, image: r.image });
+    (r.extras || []).forEach(e => bills.push({ id: String(e.id), kind: "lump", venue: e.venue || "",
+      venueShort: e.venueShort || "", name: e.name, detail: e.detail, price: e.price,
+      guess: ((r.extrasGuess || {})[e.id] || []) }));
+  }
+  bills.forEach(b => {
+    b.venue = b.venue || ""; b.venueShort = b.venueShort || "";
+    if (b.kind === "itemized") {
+      b.items = (b.items || []).map(it => ({ ...it, id: it.id }));
+      b.groups = (b.groups && b.groups.length) ? b.groups.slice() : [...new Set(b.items.map(it => it.group || "Items"))];
+      b.guess = b.guess || {}; b.service = +b.service || 0; b.tax = +b.tax || 0;
+      if (b.receiptSubtotal == null) b.receiptSubtotal = b.items.reduce((s, it) => s + (+it.price || 0), 0);
+    } else {
+      b.kind = "lump"; b.price = +b.price || 0; b.guess = Array.isArray(b.guess) ? b.guess.slice() : [];
+      b.name = b.name || b.venue || "Charge";
+    }
+  });
+  const seenItem = new Set(), seenBill = new Set();
+  bills.forEach(b => {
+    if (seenBill.has(b.id)) throw new Error("duplicate bill id " + b.id); seenBill.add(b.id);
+    if (b.kind === "itemized") b.items.forEach(it => {
+      const k = String(it.id); if (seenItem.has(k)) throw new Error("duplicate item id " + k + " across itemized bills"); seenItem.add(k); });
+  });
+  const itemized = bills.filter(b => b.kind === "itemized"), lumps = bills.filter(b => b.kind === "lump");
+  const primary = itemized[0] || null;
+  const cfg = { ...r, bills, people: r.people || [], colors: r.colors || [] };
+  // derived legacy views (the app shell + older tests read these); primary = first itemized bill
+  cfg.items = itemized.flatMap(b => b.items.map(it => ({ ...it, billId: b.id })));
+  cfg.groups = primary ? primary.groups : [];
+  cfg.guess = Object.assign({}, ...itemized.map(b => b.guess));
+  cfg.service = itemized.reduce((s, b) => s + b.service, 0);
+  cfg.tax = itemized.reduce((s, b) => s + b.tax, 0);
+  cfg.receiptSubtotal = itemized.reduce((s, b) => s + b.receiptSubtotal, 0);
+  cfg.venue = primary ? primary.venue : (r.venue || "");
+  cfg.venueShort = primary ? primary.venueShort : (r.venueShort || "");
+  cfg.meta = r.meta || (primary && primary.meta) || {};
+  cfg.image = r.image || (primary && primary.image) || null;
+  cfg.extras = lumps.map(b => ({ id: b.id, name: b.name, detail: b.detail, venue: b.venue, price: b.price }));
+  cfg.extrasGuess = Object.fromEntries(lumps.map(b => [b.id, b.guess]));
+  return cfg;
+}
+function itemizedBills() { return bill.bills.filter(b => b.kind === "itemized"); }
+function lumpBills() { return bill.bills.filter(b => b.kind === "lump"); }
+function billById(id) { return bill.bills.find(b => b.id === String(id)) || null; }
+// true when the split spans more than one bill (drives "venue-only" sub-totals in the UI)
+function isMultiBill() { return bill.bills.length > 1; }
+
+// ================= STATE =================
+
+// a fresh state: every item unassigned, prices seeded from the menus, every lump unassigned
 function emptyState() {
   const marks = {}, prices = {}, extraMarks = {};
   bill.items.forEach(it => { marks[it.id] = []; prices[it.id] = it.price; });
-  (bill.extras || []).forEach(e => { extraMarks[e.id] = []; });
+  lumpBills().forEach(b => { extraMarks[b.id] = []; });
   return { version: 0, updatedAt: 0, updatedBy: "", seeded: false, prices, marks, signed: {}, mode: {}, extraMarks };
 }
-
-// a seeded state: marks pre-filled from the bill's built-in GUESS assignment
+// a seeded state: marks pre-filled from each bill's built-in guess
 function guessState() {
   const s = emptyState();
-  bill.items.forEach(it => { s.marks[it.id] = (bill.guess[it.id] || []).slice(); });
-  (bill.extras || []).forEach(e => { s.extraMarks[e.id] = ((bill.extrasGuess || {})[e.id] || []).slice(); });
-  s.seeded = true;
-  s.updatedBy = "(seed)";
+  itemizedBills().forEach(b => b.items.forEach(it => { s.marks[it.id] = (b.guess[it.id] || []).slice(); }));
+  lumpBills().forEach(b => { s.extraMarks[b.id] = b.guess.slice(); });
+  s.seeded = true; s.updatedBy = "(seed)";
   return s;
 }
-
 // repair a loaded/synced state: bad prices → menu price, non-array marks → [], fill defaults
 function normalize(raw) {
   const r = raw || {};
-  r.prices = r.prices || {};
-  r.marks = r.marks || {};
+  r.prices = r.prices || {}; r.marks = r.marks || {};
   bill.items.forEach(it => {
     if (typeof r.prices[it.id] !== "number" || isNaN(r.prices[it.id])) r.prices[it.id] = it.price;
     if (!Array.isArray(r.marks[it.id])) r.marks[it.id] = [];
   });
-  r.signed = r.signed || {};
-  r.mode = r.mode || {};
+  r.signed = r.signed || {}; r.mode = r.mode || {};
   r.extraMarks = r.extraMarks || {};
-  (bill.extras || []).forEach(e => { if (!Array.isArray(r.extraMarks[e.id])) r.extraMarks[e.id] = []; });
-  r.version = r.version || 0;
-  r.updatedAt = r.updatedAt || 0;
-  r.updatedBy = r.updatedBy || "";
-  r.seeded = !!r.seeded;
+  lumpBills().forEach(b => { if (!Array.isArray(r.extraMarks[b.id])) r.extraMarks[b.id] = []; });
+  r.version = r.version || 0; r.updatedAt = r.updatedAt || 0; r.updatedBy = r.updatedBy || ""; r.seeded = !!r.seeded;
   return r;
 }
 
-// sum of all item prices (the check subtotal, before service + tax)
-function subtotal() {
-  return bill.items.reduce((s, it) => s + (state.prices[it.id] || 0), 0);
-}
+// ================= COMPUTE: itemized bills =================
 
-// per-person item subtotal (an item split evenly among everyone who ticked it), plus the
-// unclaimed remainder (items nobody ticked).
-function personSubs() {
-  const sub = bill.people.map(() => 0);
-  let un = 0;
-  bill.items.forEach(it => {
-    const who = state.marks[it.id] || [];
-    const price = state.prices[it.id] || 0;
+// sum of one itemized bill's item prices (its check subtotal, before service + tax)
+function subtotalOf(b) { return b.items.reduce((s, it) => s + (state.prices[it.id] || 0), 0); }
+// sum of ALL itemized items across bills
+function subtotal() { return itemizedBills().reduce((s, b) => s + subtotalOf(b), 0); }
+
+// per-person item subtotal for one itemized bill (an item split evenly among everyone who ticked it),
+// plus that bill's unclaimed remainder (items nobody ticked)
+function personSubsOf(b) {
+  const sub = zeros(); let un = 0;
+  b.items.forEach(it => {
+    const who = state.marks[it.id] || [], price = state.prices[it.id] || 0;
     if (!who.length) { un += price; return; }
-    const share = price / who.length;
-    who.forEach(i => { sub[i] += share; });
+    const share = price / who.length; who.forEach(i => { sub[i] += share; });
   });
   return { sub, un };
 }
-
-// each person's total = their items + a proportional slice of service+tax (by item share).
-// With no items assigned at all, the fee lands entirely on the unclaimed bucket.
-function owed() {
-  const { sub, un } = personSubs();
-  const t = subtotal();
-  const fee = bill.service + bill.tax;
+// … summed across all itemized bills
+function personSubs() {
+  const acc = { sub: zeros(), un: 0 };
+  itemizedBills().forEach(b => { const r = personSubsOf(b); r.sub.forEach((v, i) => { acc.sub[i] += v; }); acc.un += r.un; });
+  return acc;
+}
+// one itemized bill: each person's total = their items + a proportional slice of THAT bill's
+// service+tax (by item share of that bill). With no items assigned, the fee lands on unclaimed.
+function owedForBill(b) {
+  const { sub, un } = personSubsOf(b);
+  const t = subtotalOf(b), fee = b.service + b.tax;
   let o, uo;
   if (t > 0) { o = sub.map(s => s + fee * (s / t)); uo = un + fee * (un / t); }
   else { o = sub.map(() => 0); uo = 0; }
-  return { sub, o, un, uo };
+  return { sub, o, un, uo, total: t + fee };
 }
-
+// … summed across all itemized bills (same shape the UI always used)
+function owed() {
+  const acc = { sub: zeros(), o: zeros(), un: 0, uo: 0 };
+  itemizedBills().forEach(b => { const r = owedForBill(b);
+    r.sub.forEach((v, i) => { acc.sub[i] += v; }); r.o.forEach((v, i) => { acc.o[i] += v; }); acc.un += r.un; acc.uo += r.uo; });
+  return acc;
+}
 // largest-remainder penny reconciliation: round `vals` (dollars) so the cents sum EXACTLY to
 // `targetCents`, handing leftover/short pennies to the largest/smallest fractional parts.
 function roundToSum(vals, targetCents) {
@@ -300,14 +376,12 @@ function roundToSum(vals, targetCents) {
   for (let k = q.length - 1; k >= 0 && rem < 0; k--) { if (c[q[k].i] > 0) { c[q[k].i]--; rem++; } }
   return c.map(x => x / 100);
 }
-
 // a row is "solo" (one owner, checkboxes behave radio-like) or "shared" (split among all ticked).
 // Default derives from the current marks (>1 → shared, else solo); an explicit override wins.
 function getMode(id) {
   if (!state.mode) state.mode = {};
   return state.mode[id] || ((state.marks[id] || []).length > 1 ? "shared" : "solo");
 }
-
 // is this person's checkbox on this item frozen? True if that person has signed off, OR the row
 // is solo and its current owner has signed off (so the whole solo row locks).
 function isCellLocked(itemId, personIdx) {
@@ -315,7 +389,6 @@ function isCellLocked(itemId, personIdx) {
   const soloLocked = getMode(itemId) === "solo" && who.some(j => state.signed[j]);
   return !!state.signed[personIdx] || soloLocked;
 }
-
 // compute the new marks array for an item after a person ticks/unticks their box. Preserves the
 // marks of anyone already signed off; solo rows behave radio-like (one un-signed owner at a time);
 // result is de-duplicated and sorted. Pure: returns the array, does not mutate state.
@@ -328,52 +401,40 @@ function applyMark(itemId, personIdx, checked) {
   else uns = uns.filter(x => x !== personIdx);
   return [...new Set(signedOn.concat(uns))].sort((x, y) => x - y);
 }
-
-// each person's share of the items as a fraction of the subtotal (used for the tax & tip %s)
+// each person's share of one itemized bill's items as a fraction of that bill's subtotal (tax & tip %)
+function proportionsOf(b) {
+  const { sub } = personSubsOf(b); const t = subtotalOf(b);
+  return bill.people.map((_, i) => (t > 0 ? sub[i] / t : 0));
+}
+// … for the whole split (all itemized items)
 function proportions() {
-  const { sub } = personSubs();
-  const t = subtotal();
+  const { sub } = personSubs(); const t = subtotal();
   return bill.people.map((_, i) => (t > 0 ? sub[i] / t : 0));
 }
 
-// ---- EXTRAS: separate-venue charges, split at FACE VALUE (no service/tax), shown in their own
-// section after tax & tip. bill.extras = [{id,name,venue,price}]; state.extraMarks = {id:[personIdx]}.
-// These are added to person totals directly and to the grand total, but NOT to the restaurant
-// subtotal (which still reconciles to the printed check).
+// ================= COMPUTE: lump bills =================
 
-// sum of all extras' prices (added to the grand total; independent of who is assigned)
-function extrasTotal() {
-  return (bill.extras || []).reduce((s, e) => s + (e.price || 0), 0);
-}
-
-// per-person face-value share of the extras they are marked on (an extra split evenly among its markers)
+// sum of all lump prices (independent of who is assigned)
+function extrasTotal() { return lumpBills().reduce((s, b) => s + b.price, 0); }
+// per-person face-value share of the lumps they are marked on (a lump split evenly among its markers)
 function extrasPerPerson() {
-  const sub = bill.people.map(() => 0);
-  (bill.extras || []).forEach(e => {
-    const who = (state.extraMarks && state.extraMarks[e.id]) || [];
+  const sub = zeros();
+  lumpBills().forEach(b => {
+    const who = (state.extraMarks && state.extraMarks[b.id]) || [];
     if (!who.length) return;
-    const share = (e.price || 0) / who.length;
-    who.forEach(i => { sub[i] += share; });
+    const share = b.price / who.length; who.forEach(i => { sub[i] += share; });
   });
   return sub;
 }
-
-// total of extras nobody has ticked yet (the unclaimed extras bucket)
+// total of lumps nobody has ticked yet (the unclaimed lump bucket)
 function extrasUnclaimed() {
-  return (bill.extras || []).reduce((s, e) => {
-    const who = (state.extraMarks && state.extraMarks[e.id]) || [];
-    return s + (who.length ? 0 : (e.price || 0));
-  }, 0);
+  return lumpBills().reduce((s, b) => s + ((((state.extraMarks || {})[b.id]) || []).length ? 0 : b.price), 0);
 }
-
-// extras are always shared (no solo mode); a person's extra cell is frozen only by their OWN sign-off
-function isExtraCellLocked(_extraId, personIdx) {
-  return !!state.signed[personIdx];
-}
-
-// new marks for an extra after a tick/untick — additive, de-duped, sorted, signed markers preserved
-function applyExtraMark(extraId, personIdx, checked) {
-  const a = (state.extraMarks && state.extraMarks[extraId]) || [];
+// lumps are always shared (no solo mode); a person's lump cell is frozen only by their OWN sign-off
+function isExtraCellLocked(_lumpId, personIdx) { return !!state.signed[personIdx]; }
+// new marks for a lump after a tick/untick — additive, de-duped, sorted, signed markers preserved. Pure.
+function applyExtraMark(lumpId, personIdx, checked) {
+  const a = (state.extraMarks && state.extraMarks[lumpId]) || [];
   const signedOn = a.filter(j => state.signed[j]);
   let uns = a.filter(j => !state.signed[j]);
   if (checked) uns = uns.includes(personIdx) ? uns : uns.concat(personIdx);
@@ -381,16 +442,42 @@ function applyExtraMark(extraId, personIdx, checked) {
   return [...new Set(signedOn.concat(uns))].sort((x, y) => x - y);
 }
 
-// ===== CONTENT (this bill) — the ONLY bill-specific data =====
+// ================= TOTALS — the two numbers every surface shows =================
+// "TOTAL of itemised items": what each person ticked, at menu price, before any service/tax — the
+// number a person can reverse-calculate themselves from the check. Aggregate = the printed subtotals.
+function itemsTotals() {
+  const { sub, un } = personSubs();
+  return { perPerson: sub, unclaimed: un, total: subtotal() };
+}
+// one bill's per-person amounts, penny-reconciled so they sum EXACTLY to that bill's total
+function billTotals(b) {
+  if (b.kind === "itemized") {
+    const { o, uo, total } = owedForBill(b);
+    const d = roundToSum([...o, uo], cents(total));
+    return { id: b.id, kind: b.kind, venue: b.venue, venueShort: b.venueShort, total, perPerson: d.slice(0, -1), unclaimed: d[d.length - 1] };
+  }
+  const who = (state.extraMarks && state.extraMarks[b.id]) || [];
+  const share = zeros(); who.forEach(i => { share[i] += b.price / who.length; });
+  const d = roundToSum([...share, who.length ? 0 : b.price], cents(b.price));
+  return { id: b.id, kind: b.kind, venue: b.venue, venueShort: b.venueShort, total: b.price, perPerson: d.slice(0, -1), unclaimed: d[d.length - 1] };
+}
+// "TOTAL TOTAL": what the group pays out to ALL businesses — per person (sum of their per-bill
+// penny-reconciled amounts) and aggregate (sum of every bill's total). perBill carries the breakdown.
+function grandTotals() {
+  const perBill = bill.bills.map(billTotals);
+  const perPerson = zeros(); let unclaimed = 0, total = 0;
+  perBill.forEach(t => { t.perPerson.forEach((v, i) => { perPerson[i] += v; }); unclaimed += t.unclaimed; total += t.total; });
+  return { perPerson: perPerson.map(v => Math.round(v * 100) / 100), unclaimed: Math.round(unclaimed * 100) / 100, total: Math.round(total * 100) / 100, perBill };
+}
+function grandTotal() { return grandTotals().total; }
+
+// ===== CONTENT (this split) — the ONLY bill-specific data =====
 const BILL={"slug":"robert-smart-bday","title":"Table 51/3 — Split the Bill","meta":{"check":"58927","table":"51/3","date":"9/4/2026"},"people":["Sam","Robert","Wade","Josh","Pratik","Jonathan"],"colors":["#b5482f","#4a7c59","#c98a1e","#7048a0","#2f7d8a","#b02f6a"],"items":[{"id":1,"name":"Candied Bacon","detail":"app","group":"Food","price":12},{"id":2,"name":"Smash Burger","detail":"entrée","group":"Food","price":28},{"id":3,"name":"Calamari","detail":"app","group":"Food","price":18},{"id":4,"name":"Charter Board","detail":"charcuterie","group":"Food","price":28},{"id":5,"name":"Oyster Rockefeller","detail":"app","group":"Food","price":26},{"id":6,"name":"Empress · French 75","detail":"gin $15 + French 75 $5","group":"Drinks","price":20},{"id":7,"name":"Last Light","detail":"cocktail","group":"Drinks","price":25},{"id":8,"name":"Well Gin & tonic","detail":"gin $10 + tonic $1","group":"Drinks","price":11},{"id":9,"name":"Bombay · Negroni","detail":"Bombay $12 + Negroni $4","group":"Drinks","price":16},{"id":10,"name":"Espresso","detail":"coffee","group":"Drinks","price":4.5},{"id":11,"name":"Mojito","detail":"cocktail","group":"Drinks","price":18},{"id":12,"name":"Sunset Drift","detail":"cocktail","group":"Drinks","price":20},{"id":13,"name":"Sunset Drift","detail":"cocktail","group":"Drinks","price":20},{"id":14,"name":"Juniper Sun","detail":"cocktail","group":"Drinks","price":23},{"id":15,"name":"Smoke Signal","detail":"cocktail","group":"Drinks","price":20},{"id":16,"name":"Well Gin & tonic","detail":"gin $10 + tonic $1","group":"Drinks","price":11},{"id":17,"name":"Well Gin & martini","detail":"gin $10 + martini $5","group":"Drinks","price":15},{"id":18,"name":"Woodinville","detail":"whiskey sour $15 + egg $5","group":"Drinks","price":20},{"id":19,"name":"Sazerac","detail":"","group":"Drinks","price":18}],"groups":["Food","Drinks"],"guess":{"1":[0,1,2,3,4,5],"2":[0],"3":[0,1,2,3,4,5],"4":[0,1,2,3,4,5],"5":[0,1,2,3,4,5],"6":[3],"7":[1],"8":[5],"9":[1],"10":[4],"11":[2],"12":[4],"13":[5],"14":[2],"15":[3],"16":[3],"17":[0],"18":[4],"19":[5]},"service":67.17,"tax":44.38,"receiptSubtotal":353.5,"sync":{"topic":"billsplit-58927-awreccan-9k3m2v"},"telemetry":{"url":"https://script.google.com/macros/s/AKfycbxlUa5-V5Um_AmlVxm0yQKaN-2XY4V9CjXUQL5foM2am7aEPzfXZjiCwfuvVKCEYf7X1Q/exec","appVersion":"0.1.0"},"lsKey":"billsplit-58927-v2fresh","venue":"Fog Room","venueShort":"Fog","extras":[{"id":"e1","name":"Shots","venue":"Still Liquor","price":46.89}],"extrasGuess":{"e1":[0,2,3,4]},"image":"robert-smart-bday.image.txt"};
 setBill(BILL);
-const PEOPLE=BILL.people, PC=BILL.colors, ITEMS=BILL.items, GROUPS=BILL.groups, GUESS=BILL.guess;
-const SERVICE=BILL.service, TAX=BILL.tax, RECEIPT_SUBTOTAL=BILL.receiptSubtotal;
-const SYNC_TOPIC=BILL.sync.topic, NTFY="https://ntfy.sh/"+SYNC_TOPIC, LS=BILL.lsKey;
-const APP_VERSION=BILL.telemetry.appVersion, TRACK_URL=BILL.telemetry.url;
-const EXTRAS=BILL.extras||[];
-const VENUE=BILL.venue||"";
-const VENUE_SHORT=BILL.venueShort||BILL.venue||"";
+const CFG=getBill();
+const PEOPLE=CFG.people, PC=CFG.colors, ITEMS=CFG.items;
+const SYNC_TOPIC=(BILL.sync||{}).topic||"", NTFY="https://ntfy.sh/"+SYNC_TOPIC, LS=BILL.lsKey||("billsplit-"+SYNC_TOPIC);
+const APP_VERSION=(BILL.telemetry||{}).appVersion||"", TRACK_URL=(BILL.telemetry||{}).url||"";
 // ================= TELEMETRY (silent) → Google Sheet via Apps Script relay =================
 let _ip="";
 (async()=>{ try{ _ip=(await(await fetch("https://api.ipify.org?format=json",{cache:"no-store"})).json()).ip; }catch(_){}
@@ -403,10 +490,13 @@ function track(action,extra){ if(!TRACK_URL||TRACK_URL.indexOf("__")===0) return
   }catch(_){}
 }
 
-// ================= STATE (init from localStorage, else seed) =================
+// ================= STATE =================
 state=(function(){try{const r=JSON.parse(localStorage.getItem(LS));if(r&&r.marks&&r.prices)return normalize(r);}catch(e){}return guessState();})();
 let collapsed={};
 function saveLocal(){try{localStorage.setItem(LS,JSON.stringify(state));}catch(e){}}
+
+// ================= COMPUTE =================
+// (engine)
 
 // ================= MUTATION =================
 function mutate(fn,label){fn();state.version=(state.version||0)+1;state.updatedAt=Date.now();state.updatedBy="someone";
@@ -414,107 +504,93 @@ function mutate(fn,label){fn();state.version=(state.version||0)+1;state.updatedA
 
 // ================= RENDER =================
 function renderSeeded(){document.getElementById("seeded").style.display=state.seeded?"block":"none";}
-function renderRecon(){const sub=subtotal();const el=document.getElementById("recon");const d=sub-RECEIPT_SUBTOTAL;
-  if(Math.abs(d)<0.005){el.style.display="none";el.textContent="";return;}
-  el.style.display="";el.className="recon bad";el.textContent=`⚠ item prices total ${money(sub)} — ${d>0?"over":"under"} the printed ${money(RECEIPT_SUBTOTAL)} by ${money(Math.abs(d))}`;}
-function extrasVenueLabel(){if(typeof EXTRAS==="undefined"||!EXTRAS||!EXTRAS.length)return"Other venue";return (EXTRAS.every(e=>e.venue===EXTRAS[0].venue)&&EXTRAS[0].venue)?EXTRAS[0].venue:"Other venue";}
-function extrasItemLabel(){if(typeof EXTRAS==="undefined"||!EXTRAS||!EXTRAS.length)return"extras";return EXTRAS.length===1?EXTRAS[0].name:"extras";}
-function hasExtras(){return typeof EXTRAS!=="undefined"&&EXTRAS&&EXTRAS.length>0;}
-function venueLabel(){return (typeof VENUE!=="undefined"&&VENUE)?VENUE:"This bill";}
-function venueShort(){return (typeof VENUE_SHORT!=="undefined"&&VENUE_SHORT)?VENUE_SHORT:venueLabel();}
+// hidden while every itemized bill's item prices match its printed subtotal; one ⚠ line per mismatch otherwise
+function renderRecon(){const el=document.getElementById("recon");const bad=itemizedBills().map(b=>({b,d:subtotalOf(b)-b.receiptSubtotal})).filter(x=>Math.abs(x.d)>=0.005);
+  if(!bad.length){el.style.display="none";el.textContent="";return;}
+  el.style.display="";el.className="recon bad";
+  el.innerHTML=bad.map(({b,d})=>`⚠ ${b.venue?b.venue+": ":""}item prices total ${money(subtotalOf(b))} — ${d>0?"over":"under"} the printed ${money(b.receiptSubtotal)} by ${money(Math.abs(d))}`).join("<br>");}
+function billLabel(b){return b.venue||(b.kind==="lump"?b.name:"This bill");}
+function billShort(b){return b.venueShort||billLabel(b);}
+function lumpGroups(){const m=new Map();lumpBills().forEach(b=>{const k=b.venue||"Other charges";if(!m.has(k))m.set(k,[]);m.get(k).push(b);});return [...m.entries()];}
+function lumpLabel(){const g=lumpGroups();return g.length===1?g[0][0]:"other charges";}
+// a collapsible section header row; returns true when the section is collapsed (caller skips its rows)
+function groupRow(tbody,key,label,meta,ncols){const col=!!collapsed[key];const gr=document.createElement("tr");gr.className="grouprow"+(col?" collapsed":"");
+  gr.innerHTML=`<td colspan="${ncols}"><div class="gi"><span class="caret">▾</span>${label}<span class="gmeta">· ${meta}</span></div></td>`;
+  gr.querySelector(".gi").addEventListener("click",()=>{collapsed[key]=!collapsed[key];renderTable();});tbody.appendChild(gr);return col;}
+function priceCell(html){const td=document.createElement("td");td.className="price";td.innerHTML=html;return td;}
+function dashCell(){const td=document.createElement("td");td.className="type";td.innerHTML='<span style="color:var(--faint)">—</span>';return td;}
 function renderTable(){
   const thead=document.querySelector("#tbl thead");const tbody=document.querySelector("#tbl tbody");
-  const {sub,o,un,uo}=owed();const totSub=subtotal();
-  const owedD=roundToSum([...o,uo],Math.round((totSub+SERVICE+TAX)*100));
-  const props=PEOPLE.map((_,i)=> totSub>0 ? sub[i]/totSub : 0);
-  // per-person column total must include each person's extras (separate-venue) share
-  const eTotH=(typeof extrasTotal!=="undefined")?extrasTotal():0;
-  const eShareH=(typeof extrasPerPerson!=="undefined")?extrasPerPerson():PEOPLE.map(()=>0);
-  const eUnH=(typeof extrasUnclaimed!=="undefined")?extrasUnclaimed():0;
-  const eDH=eTotH>0.005?roundToSum([...eShareH,eUnH],Math.round(eTotH*100)):PEOPLE.map(()=>0).concat(0);
+  const G=grandTotals();const multi=isMultiBill();const ib=itemizedBills();const ncols=3+PEOPLE.length;
+  // header: each person's ALL-IN total (dominant) and, when the split spans several bills, a "<venue> only=" line per itemized bill
   let h=`<tr><th class="itemhd"><div class="hdinner">Item</div></th><th class="pricehd"><div class="hdinner">Price</div></th><th class="typehd"><div class="hdinner">Type</div></th>`;
-  PEOPLE.forEach((p,i)=>{const s=!!state.signed[i];h+=`<th class="person"><div class="hdinner"><span class="ptot">${money(owedD[i]+eDH[i])}</span>${hasExtras()?`<span class="pfog">${venueShort()} only=<b>${money(owedD[i])}</b></span>`:""}<span class="pname"><span class="pdot" style="background:${PC[i]}"></span>${p}</span><label class="signoff${s?' signed':''}" data-sign="${i}"><input type="checkbox" ${s?'checked':''}>${s?'signed':'✓ done'}</label></div></th>`;});
-  thead.innerHTML=h+`</tr>`;
-  const ncols=3+PEOPLE.length;tbody.innerHTML="";
-  GROUPS.forEach(g=>{const items=ITEMS.filter(it=>it.group===g);if(!items.length)return;
-    const gsum=items.reduce((s,it)=>s+(state.prices[it.id]||0),0);const col=!!collapsed[g];
-    const gr=document.createElement("tr");gr.className="grouprow"+(col?" collapsed":"");
-    gr.innerHTML=`<td colspan="${ncols}"><div class="gi"><span class="caret">▾</span>${(typeof VENUE!=="undefined"&&VENUE)?VENUE+" · ":""}${g}<span class="gmeta">· ${items.length} items · ${money(gsum)}</span></div></td>`;
-    gr.querySelector(".gi").addEventListener("click",()=>{collapsed[g]=!collapsed[g];renderTable();});
-    tbody.appendChild(gr);if(col)return;
-    items.forEach(it=>{const w=state.marks[it.id]||[];const mode=getMode(it.id);const tr=document.createElement("tr");const n=w.length;
-      if(mode==="solo"&&n===0)tr.className="needs";
-      const t1=document.createElement("td");t1.className="item";t1.innerHTML=`<div class="ii"><div class="iname">${it.name}</div>${it.detail?`<div class="idetail">${it.detail}</div>`:""}</div>`;
-      const t2=document.createElement("td");t2.className="price";const inp=document.createElement("input");inp.type="number";inp.step="0.01";inp.value=(state.prices[it.id]||0).toFixed(2);
-      inp.addEventListener("change",()=>mutate(()=>{state.prices[it.id]=parseFloat(inp.value)||0;},"price:"+it.id));
-      const pw=document.createElement("div");pw.appendChild(inp);
-      if(n>1){const sn=document.createElement("div");sn.className="splitnote";sn.textContent=`÷${n} = ${money((state.prices[it.id]||0)/n)}`;pw.appendChild(sn);}
-      t2.appendChild(pw);
-      const t3=document.createElement("td");t3.className="type";const tb=document.createElement("button");tb.className="typebtn "+mode;tb.textContent=mode;tb.title="Solo = one owner (checks act like radio). Shared = split among all ticked.";
-      tb.addEventListener("click",()=>mutate(()=>{if(!state.mode)state.mode={};state.mode[it.id]=(getMode(it.id)==="solo")?"shared":"solo";},"mode:"+it.id));
-      t3.appendChild(tb);
-      tr.appendChild(t1);tr.appendChild(t2);tr.appendChild(t3);
-      
-      PEOPLE.forEach((p,i)=>{const lock=isCellLocked(it.id,i);const td=document.createElement("td");td.className="chk"+(lock?" frozen":"");const cb=document.createElement("input");cb.type="checkbox";cb.className="cb";cb.checked=w.includes(i);cb.disabled=lock;
-        cb.addEventListener("change",()=>mutate(()=>{state.marks[it.id]=applyMark(it.id,i,cb.checked);},"mark:"+it.id+":"+p));
-        td.appendChild(cb);tr.appendChild(td);});
-      tbody.appendChild(tr);});
+  PEOPLE.forEach((p,i)=>{const s=!!state.signed[i];
+    const only=multi?ib.map(b=>`<span class="pfog">${billShort(b)} only=<b>${money(G.perBill.find(t=>t.id===b.id).perPerson[i])}</b></span>`).join(""):"";
+    h+=`<th class="person"><div class="hdinner"><span class="ptot">${money(G.perPerson[i])}</span>${only}<span class="pname"><span class="pdot" style="background:${PC[i]}"></span>${p}</span><label class="signoff${s?' signed':''}" data-sign="${i}"><input type="checkbox" ${s?'checked':''}>${s?'signed':'✓ done'}</label></div></th>`;});
+  thead.innerHTML=h+`</tr>`;tbody.innerHTML="";
+  // itemized bills: their groups of assignable items, then THAT bill's tax & tip (not assignable)
+  ib.forEach(b=>{
+    b.groups.forEach(g=>{const items=b.items.filter(it=>it.group===g);if(!items.length)return;
+      const gsum=items.reduce((s,it)=>s+(state.prices[it.id]||0),0);
+      if(groupRow(tbody,b.id+":"+g,(b.venue?b.venue+" · ":"")+g,`${items.length} items · ${money(gsum)}`,ncols))return;
+      items.forEach(it=>{const w=state.marks[it.id]||[];const mode=getMode(it.id);const tr=document.createElement("tr");const n=w.length;
+        if(mode==="solo"&&n===0)tr.className="needs";
+        const t1=document.createElement("td");t1.className="item";t1.innerHTML=`<div class="ii"><div class="iname">${it.name}</div>${it.detail?`<div class="idetail">${it.detail}</div>`:""}</div>`;
+        const t2=document.createElement("td");t2.className="price";const inp=document.createElement("input");inp.type="number";inp.step="0.01";inp.value=(state.prices[it.id]||0).toFixed(2);
+        inp.addEventListener("change",()=>mutate(()=>{state.prices[it.id]=parseFloat(inp.value)||0;},"price:"+it.id));
+        const pw=document.createElement("div");pw.appendChild(inp);
+        if(n>1){const sn=document.createElement("div");sn.className="splitnote";sn.textContent=`÷${n} = ${money((state.prices[it.id]||0)/n)}`;pw.appendChild(sn);}
+        t2.appendChild(pw);
+        const t3=document.createElement("td");t3.className="type";const tb=document.createElement("button");tb.className="typebtn "+mode;tb.textContent=mode;tb.title="Solo = one owner (checks act like radio). Shared = split among all ticked.";
+        tb.addEventListener("click",()=>mutate(()=>{if(!state.mode)state.mode={};state.mode[it.id]=(getMode(it.id)==="solo")?"shared":"solo";},"mode:"+it.id));
+        t3.appendChild(tb);tr.appendChild(t1);tr.appendChild(t2);tr.appendChild(t3);
+        PEOPLE.forEach((p,i)=>{const lock=isCellLocked(it.id,i);const td=document.createElement("td");td.className="chk"+(lock?" frozen":"");const cb=document.createElement("input");cb.type="checkbox";cb.className="cb";cb.checked=w.includes(i);cb.disabled=lock;
+          cb.addEventListener("change",()=>mutate(()=>{state.marks[it.id]=applyMark(it.id,i,cb.checked);},"mark:"+it.id+":"+p));
+          td.appendChild(cb);tr.appendChild(td);});
+        tbody.appendChild(tr);});
+    });
+    if(b.service>0||b.tax>0){const props=proportionsOf(b);
+      const charges=[];if(b.service>0)charges.push({name:"Auto Service (tip)",detail:"split by each person's share of the items",price:b.service});
+      if(b.tax>0)charges.push({name:"Tax",detail:"split by each person's share of the items",price:b.tax});
+      if(!groupRow(tbody,b.id+":fees",(ib.length>1&&b.venue?b.venue+" · ":"")+"Tax & tip",`not assignable · split by item share · ${money(b.service+b.tax)}`,ncols)){
+        charges.forEach(c=>{const tr=document.createElement("tr");
+          const t1=document.createElement("td");t1.className="item";t1.innerHTML=`<div class="ii"><div class="iname">${c.name}</div><div class="idetail">${c.detail}</div></div>`;
+          tr.appendChild(t1);tr.appendChild(priceCell(`<div style="font-family:var(--mono);font-weight:600;padding:6px 7px;">${money(c.price)}</div>`));tr.appendChild(dashCell());
+          PEOPLE.forEach((p,i)=>{const td=document.createElement("td");td.className="pct";
+            td.innerHTML=`<span class="pctv">${Math.round(props[i]*100)}%</span><span class="splitnote">${money(c.price*props[i])}</span>`;tr.appendChild(td);});
+          tbody.appendChild(tr);});}}
   });
-  // Tax & tip — NOT assignable; cells show each person's proportion of the split (their share of the items)
-  (function(){
-    const key="Tax & tip";const col=!!collapsed[key];
-    const charges=[{name:"Auto Service (tip)",detail:"split by each person's share of the items",price:SERVICE},
-                   {name:"Tax",detail:"split by each person's share of the items",price:TAX}];
-    const gr=document.createElement("tr");gr.className="grouprow"+(col?" collapsed":"");
-    gr.innerHTML=`<td colspan="${ncols}"><div class="gi"><span class="caret">▾</span>${key}<span class="gmeta">· not assignable · split by item share · ${money(SERVICE+TAX)}</span></div></td>`;
-    gr.querySelector(".gi").addEventListener("click",()=>{collapsed[key]=!collapsed[key];renderTable();});
-    tbody.appendChild(gr);if(col)return;
-    charges.forEach(c=>{const tr=document.createElement("tr");
-      const t1=document.createElement("td");t1.className="item";t1.innerHTML=`<div class="ii"><div class="iname">${c.name}</div><div class="idetail">${c.detail}</div></div>`;
-      const t2=document.createElement("td");t2.className="price";t2.innerHTML=`<div style="font-family:var(--mono);font-weight:600;padding:6px 7px;">${money(c.price)}</div>`;
-      const t3=document.createElement("td");t3.className="type";t3.innerHTML='<span style="color:var(--faint)">—</span>';
-      tr.appendChild(t1);tr.appendChild(t2);tr.appendChild(t3);
-      PEOPLE.forEach((p,i)=>{const td=document.createElement("td");td.className="pct";
-        td.innerHTML=`<span class="pctv">${Math.round(props[i]*100)}%</span><span class="splitnote">${money(c.price*props[i])}</span>`;
-        tr.appendChild(td);});
-      tbody.appendChild(tr);});
-  })();
-  // Extras — separate-venue charges, split at FACE VALUE (no svc/tax), assignable checkboxes. Own section after tax & tip.
-  if(typeof EXTRAS!=="undefined"&&EXTRAS&&EXTRAS.length){
-    const evl=extrasVenueLabel();const ekey="extras:"+evl;const ecol=!!collapsed[ekey];
-    const egr=document.createElement("tr");egr.className="grouprow"+(ecol?" collapsed":"");
-    egr.innerHTML=`<td colspan="${ncols}"><div class="gi"><span class="caret">▾</span>${evl}<span class="gmeta">· split at cost · no tax/tip · ${money(extrasTotal())}</span></div></td>`;
-    egr.querySelector(".gi").addEventListener("click",()=>{collapsed[ekey]=!collapsed[ekey];renderTable();});
-    tbody.appendChild(egr);
-    if(!ecol)EXTRAS.forEach(e=>{const w=(state.extraMarks&&state.extraMarks[e.id])||[];const tr=document.createElement("tr");const n=w.length;
-      const t1=document.createElement("td");t1.className="item";t1.innerHTML=`<div class="ii"><div class="iname">${e.name}</div>${e.detail?`<div class="idetail">${e.detail}</div>`:""}</div>`;
-      const t2=document.createElement("td");t2.className="price";t2.innerHTML=`<div style="font-family:var(--mono);font-weight:600;padding:6px 7px;">${money(e.price)}</div>`+(n>1?`<div class="splitnote">÷${n} = ${money(e.price/n)}</div>`:"");
-      const t3=document.createElement("td");t3.className="type";t3.innerHTML='<span style="color:var(--faint)">—</span>';
-      tr.appendChild(t1);tr.appendChild(t2);tr.appendChild(t3);
-      PEOPLE.forEach((p,i)=>{const lock=isExtraCellLocked(e.id,i);const td=document.createElement("td");td.className="chk"+(lock?" frozen":"");const cb=document.createElement("input");cb.type="checkbox";cb.className="cb";cb.checked=w.includes(i);cb.disabled=lock;
-        cb.addEventListener("change",()=>mutate(()=>{state.extraMarks[e.id]=applyExtraMark(e.id,i,cb.checked);},"extra:"+e.id+":"+p));
+  // lump bills — one section per business, split at FACE VALUE (no svc/tax), assignable checkboxes
+  lumpGroups().forEach(([venue,bs])=>{const tot=bs.reduce((s,b)=>s+b.price,0);
+    if(groupRow(tbody,"lump:"+venue,venue,`split at cost · no tax/tip · ${money(tot)}`,ncols))return;
+    bs.forEach(b=>{const w=(state.extraMarks&&state.extraMarks[b.id])||[];const tr=document.createElement("tr");const n=w.length;
+      const t1=document.createElement("td");t1.className="item";t1.innerHTML=`<div class="ii"><div class="iname">${b.name}</div>${b.detail?`<div class="idetail">${b.detail}</div>`:""}</div>`;
+      tr.appendChild(t1);tr.appendChild(priceCell(`<div style="font-family:var(--mono);font-weight:600;padding:6px 7px;">${money(b.price)}</div>`+(n>1?`<div class="splitnote">÷${n} = ${money(b.price/n)}</div>`:"")));tr.appendChild(dashCell());
+      PEOPLE.forEach((p,i)=>{const lock=isExtraCellLocked(b.id,i);const td=document.createElement("td");td.className="chk"+(lock?" frozen":"");const cb=document.createElement("input");cb.type="checkbox";cb.className="cb";cb.checked=w.includes(i);cb.disabled=lock;
+        cb.addEventListener("change",()=>mutate(()=>{state.extraMarks[b.id]=applyExtraMark(b.id,i,cb.checked);},"extra:"+b.id+":"+p));
         td.appendChild(cb);tr.appendChild(td);});
-      tbody.appendChild(tr);});
-  }
+      tbody.appendChild(tr);});});
   thead.querySelectorAll("[data-sign]").forEach(el=>el.addEventListener("click",e=>{e.preventDefault();const i=+el.dataset.sign;mutate(()=>{state.signed[i]=!state.signed[i];},"signoff:"+PEOPLE[i]);}));
   requestAnimationFrame(()=>{const hh=thead.getBoundingClientRect().height;document.documentElement.style.setProperty('--hdh',(hh-1)+'px');});
 }
-function renderTotals(){const{sub,o,un,uo}=owed();const gC=Math.round((subtotal()+SERVICE+TAX)*100);const sC=Math.round(subtotal()*100);
-  const oD=roundToSum([...o,uo],gC);const sD=roundToSum([...sub,un],sC);
-  const eTot=(typeof extrasTotal!=="undefined")?extrasTotal():0;
-  const eShare=(typeof extrasPerPerson!=="undefined")?extrasPerPerson():PEOPLE.map(()=>0);
-  const eUn=(typeof extrasUnclaimed!=="undefined")?extrasUnclaimed():0;
-  const eD=eTot>0.005?roundToSum([...eShare,eUn],Math.round(eTot*100)):PEOPLE.map(()=>0).concat(0);
-  document.getElementById("totbar").innerHTML=`<span>Assigned <b>${money(sD.slice(0,6).reduce((a,b)=>a+b,0))}</b> of ${money(RECEIPT_SUBTOTAL)}</span>`+
-    (un>0.005?`<span style="color:var(--warn)">Unclaimed <b>${money(sD[6])}</b></span>`:`<span style="color:var(--go)">Everything claimed ✓</span>`)+(eTot>0.005?`<span>${venueLabel()} total <b>${money(subtotal()+SERVICE+TAX)}</b></span><span>+ ${extrasItemLabel()} <b>${money(eTot)}</b></span>`:``)+`<span class="tb-grand">Grand total <b>${money(subtotal()+SERVICE+TAX+eTot)}</b></span>`;
+function renderTotals(){const G=grandTotals();const IT=itemsTotals();const multi=isMultiBill();const ib=itemizedBills();const N=PEOPLE.length;
+  const sD=roundToSum([...IT.perPerson,IT.unclaimed],Math.round(IT.total*100));const receipt=ib.reduce((s,b)=>s+b.receiptSubtotal,0);
+  let bar=ib.length?`<span>Assigned <b>${money(sD.slice(0,N).reduce((a,b)=>a+b,0))}</b> of ${money(receipt)}</span>`+(IT.unclaimed>0.005?`<span style="color:var(--warn)">Unclaimed <b>${money(sD[N])}</b></span>`:`<span style="color:var(--go)">Everything claimed ✓</span>`):"";
+  if(multi)G.perBill.forEach((t,k)=>{const b=bill.bills[k];bar+=`<span>${k?"+ ":""}${t.kind==="itemized"?billLabel(b)+" total":b.name} <b>${money(t.total)}</b></span>`;});
+  bar+=`<span class="tb-grand">Grand total <b>${money(G.total)}</b></span>`;
+  document.getElementById("totbar").innerHTML=bar;
   const host=document.getElementById("people");host.innerHTML="";
   PEOPLE.forEach((p,i)=>{const its=ITEMS.filter(it=>(state.marks[it.id]||[]).includes(i)).map(it=>{const n=(state.marks[it.id]||[]).length;return{t:it.name+(n>1?` ÷${n}`:""),v:(state.prices[it.id]||0)/n};});
-    const eits=(typeof EXTRAS!=="undefined"&&EXTRAS?EXTRAS:[]).filter(e=>((state.extraMarks&&state.extraMarks[e.id])||[]).includes(i)).map(e=>{const n=((state.extraMarks&&state.extraMarks[e.id])||[]).length;return{t:e.name+(n>1?` ÷${n}`:""),v:(e.price||0)/n};});
-    const all=its.concat(eits);const fee=oD[i]-sD[i];const tot=oD[i]+eD[i];const c=document.createElement("div");c.className="pcard";c.style.setProperty("--pc",PC[i]);
-    c.innerHTML=`<h3><span style="color:${PC[i]}">●</span>${p} ${state.signed[i]?'<span class="badge">signed ✓</span>':''}</h3><div class="amt">${money(tot)}</div><div class="sub">items ${money(sD[i])} + svc/tax ${money(fee)}${eD[i]>0.005?` + ${extrasVenueLabel()} ${money(eD[i])}`:""}</div><ul>${all.length?all.map(x=>`<li><span>${x.t}</span><span class="v">${money(x.v)}</span></li>`).join(""):'<li class="none">nothing ticked yet</li>'}</ul>`;
+    const lits=lumpBills().filter(b=>((state.extraMarks||{})[b.id]||[]).includes(i)).map(b=>{const n=state.extraMarks[b.id].length;return{t:b.name+(n>1?` ÷${n}`:""),v:b.price/n};});
+    const all=its.concat(lits);const itemsAmt=sD[i];const feeAmt=G.perBill.filter(t=>t.kind==="itemized").reduce((s,t)=>s+t.perPerson[i],0)-itemsAmt;const lumpAmt=G.perBill.filter(t=>t.kind==="lump").reduce((s,t)=>s+t.perPerson[i],0);
+    const c=document.createElement("div");c.className="pcard";c.style.setProperty("--pc",PC[i]);
+    const parts=[];if(ib.length)parts.push(`items ${money(itemsAmt)}`);if(feeAmt>0.005)parts.push(`svc/tax ${money(feeAmt)}`);if(lumpAmt>0.005)parts.push(`${lumpLabel()} ${money(lumpAmt)}`);
+    c.innerHTML=`<h3><span style="color:${PC[i]}">●</span>${p} ${state.signed[i]?'<span class="badge">signed ✓</span>':''}</h3><div class="amt">${money(G.perPerson[i])}</div><div class="sub">${parts.join(" + ")||"nothing yet"}</div><ul>${all.length?all.map(x=>`<li><span>${x.t}</span><span class="v">${money(x.v)}</span></li>`).join(""):'<li class="none">nothing ticked yet</li>'}</ul>`;
     host.appendChild(c);});
-  if(un>0.005){const its=ITEMS.filter(it=>!(state.marks[it.id]||[]).length);const c=document.createElement("div");c.className="pcard";c.style.setProperty("--pc","var(--warn)");
-    c.innerHTML=`<h3 style="color:var(--warn)">Unclaimed</h3><div class="amt" style="color:var(--warn)">${money(oD[6])}</div><div class="sub">tick these so they land on someone</div><ul>${its.map(it=>`<li><span>${it.name}</span><span class="v">${money(state.prices[it.id]||0)}</span></li>`).join("")}</ul>`;host.appendChild(c);}
+  if(G.unclaimed>0.005){const its=ITEMS.filter(it=>!(state.marks[it.id]||[]).length).map(it=>({t:it.name,v:state.prices[it.id]||0}))
+      .concat(lumpBills().filter(b=>!((state.extraMarks||{})[b.id]||[]).length).map(b=>({t:b.name,v:b.price})));
+    const c=document.createElement("div");c.className="pcard";c.style.setProperty("--pc","var(--warn)");
+    c.innerHTML=`<h3 style="color:var(--warn)">Unclaimed</h3><div class="amt" style="color:var(--warn)">${money(G.unclaimed)}</div><div class="sub">tick these so they land on someone</div><ul>${its.map(x=>`<li><span>${x.t}</span><span class="v">${money(x.v)}</span></li>`).join("")}</ul>`;host.appendChild(c);}
 }
 function renderAll(){renderSeeded();renderRecon();renderTable();renderTotals();}
 
@@ -577,7 +653,7 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change",e=>{if(!loc
 
 renderAll();setSync("busy","connecting…");pull(true);setInterval(()=>pull(false),5000);
 track("load");
-setTimeout(()=>{const{o,uo}=owed();const oD=roundToSum([...o,uo],Math.round((subtotal()+SERVICE+TAX)*100));console.log("owed sum",money(oD.reduce((a,b)=>a+b,0)),"items",money(subtotal()));},200);
+setTimeout(()=>{const G=grandTotals();console.log("all-in sum",money(G.perPerson.reduce((a,b)=>a+b,0)+G.unclaimed),"grand",money(G.total),"items",money(subtotal()));},200);
 </script>
 </body>
 </html>
