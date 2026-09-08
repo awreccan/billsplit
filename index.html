@@ -64,12 +64,6 @@ body.billopen .billtab{display:none;}
 h1{font-family:var(--disp);font-optical-sizing:auto;font-weight:900;font-size:clamp(30px,7vw,48px);line-height:.98;letter-spacing:-.02em;margin:8px 0 6px;}
 .chk-meta{font-family:var(--mono);font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 16px;border-top:1px dashed var(--line2);border-bottom:1px dashed var(--line2);padding:9px 0;margin-top:14px;}
 .chk-meta b{color:var(--ink);font-weight:600;} .grand{font-family:var(--disp);font-weight:900;}
-.topgrand{margin-top:12px;display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px 18px;border-top:1px dashed var(--line2);padding-top:12px;}
-.topgrand .tg-parts{display:flex;flex-wrap:wrap;gap:4px 16px;font-family:var(--mono);font-size:13px;color:var(--muted);}
-.topgrand .tg-parts b{color:var(--ink);font-weight:600;} .topgrand .tg-plus b{color:var(--accent);}
-.topgrand .tg-final{display:flex;flex-direction:column;align-items:flex-end;line-height:1;}
-.topgrand .tg-final .grand{font-family:var(--disp);font-weight:900;font-size:2.5rem;color:var(--ink);}
-.topgrand .tg-cap{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;margin-top:3px;}
 .theme{display:inline-flex;border:1.5px solid var(--line2);border-radius:10px;overflow:hidden;}
 .theme button{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding:8px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer;}
 .theme button.on{background:var(--ink);color:var(--bg);}
@@ -87,7 +81,7 @@ h1{font-family:var(--disp);font-optical-sizing:auto;font-weight:900;font-size:cl
 .seg button.on{background:var(--accent);color:var(--accent-ink);}
 .view{display:none;} .view.on{display:block;animation:rise .25s ease;} @keyframes rise{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
 .recon{font-family:var(--mono);font-size:12.5px;margin:0 0 12px;padding:9px 12px;border-radius:8px;border:1px dashed var(--line2);}
-.recon.ok{color:var(--go);} .recon.bad{color:var(--warn);border-style:solid;}
+.recon.bad{color:var(--warn);border-style:solid;}
 
 /* table */
 .tblcard{background:var(--card);border:1.5px solid var(--line2);border-radius:10px;overflow:hidden;}
@@ -103,6 +97,8 @@ th.person .hdinner{display:flex;flex-direction:column;align-items:center;gap:7px
 th.person .pname{font-family:var(--disp);font-weight:600;font-size:15px;display:flex;align-items:center;gap:5px;}
 th.person .pdot{width:9px;height:9px;border-radius:50%;}
 th.person .ptot{font-family:var(--disp);font-weight:900;font-size:17px;letter-spacing:-.01em;line-height:1;}
+th.person .pfog{display:flex;flex-direction:column;align-items:center;gap:1px;margin-top:-3px;font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);line-height:1.15;}
+th.person .pfog b{font-size:12px;letter-spacing:0;text-transform:none;color:var(--ink);font-weight:600;}
 td.pct{text-align:center;padding:9px 4px;}
 td.pct .pctv{font-family:var(--mono);font-weight:600;font-size:14px;display:block;color:var(--ink);}
 td.pct .splitnote{color:var(--muted);}
@@ -141,7 +137,7 @@ tr.grouprow .gmeta{color:var(--muted);font-weight:400;text-transform:none;letter
 .pcard .sub{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:10px;}
 .pcard ul{list-style:none;margin:0;padding:0;} .pcard li{display:flex;justify-content:space-between;gap:8px;padding:5px 0;font-size:14px;border-top:1px dashed var(--line);}
 .pcard li .v{font-family:var(--mono);color:var(--muted);white-space:nowrap;} .pcard .none{color:var(--faint);font-style:italic;font-size:13.5px;}
-.totbar{font-family:var(--mono);font-size:13px;color:var(--muted);margin-bottom:14px;display:flex;flex-wrap:wrap;gap:6px 20px;} .totbar b{color:var(--ink);}
+.totbar{font-family:var(--mono);font-size:13px;color:var(--muted);margin-bottom:14px;display:flex;flex-wrap:wrap;gap:6px 20px;align-items:baseline;} .totbar b{color:var(--ink);} .totbar .tb-grand b{font-family:var(--disp);font-weight:900;font-size:1.35rem;}
 footer{margin-top:26px;font-family:var(--mono);font-size:11.5px;color:var(--faint);text-align:center;line-height:1.7;}
 @media(max-width:600px){.wrap{padding:16px 12px 70px;}.ticket{padding:20px 18px;}th.person{min-width:70px;}td.chk .cb{width:20px;height:20px;}.seg button{padding:8px 13px;}}
 </style>
@@ -162,9 +158,8 @@ footer{margin-top:26px;font-family:var(--mono);font-size:11.5px;color:var(--fain
     <div class="chk-meta">
       <span>CHK <b>58927</b></span><span>TBL <b>51/3</b></span><span>DATE <b>9/4/2026</b></span>
       <span>SUBTOTAL <b>$353.50</b></span><span>SVC <b>$67.17</b></span><span>TAX <b>$44.38</b></span>
-      
+      <span>FOG ROOM <b>$465.05</b></span><span>+ SHOTS <b>$46.89</b></span><span>TOTAL <b class="grand">$511.94</b></span>
     </div>
-    <div class="topgrand"><div class="tg-parts"><span>Fog Room <b>$465.05</b></span><span class="tg-plus">+ Shots <b>$46.89</b></span></div><div class="tg-final"><b class="grand">$511.94</b><span class="tg-cap">total incl. shots</span></div></div>
     <ul style="margin:14px 0 0;padding-left:20px;font-size:14.5px;color:var(--muted);max-width:64ch;line-height:1.7;">
       <li>Tick what <b style="color:var(--ink)">you</b> ordered.</li>
       <li>When you're done, hit <b style="color:var(--go)">✓ Done</b> under your name.</li>
@@ -179,7 +174,7 @@ footer{margin-top:26px;font-family:var(--mono);font-size:11.5px;color:var(--fain
   <div class="seg" id="seg"><button data-v="assign" class="on">Assign</button><button data-v="totals">Totals</button></div>
 
   <div class="view on" id="view-assign">
-    <div class="recon ok" id="recon"></div>
+    <div class="recon" id="recon" style="display:none"></div>
     <div class="tblcard"><div class="tblscroll"><table id="tbl"><thead></thead><tbody></tbody></table></div></div>
   </div>
   <div class="view" id="view-totals">
@@ -188,7 +183,7 @@ footer{margin-top:26px;font-family:var(--mono);font-size:11.5px;color:var(--fain
   </div>
 
   <footer>
-    Prices read from the printed check · reconcile to $353.50 subtotal · $465.05 total.<br>
+    Prices read from the printed check · reconcile to $353.50 subtotal · $465.05 Fog Room total · + $46.89 Shots = $511.94 all-in.<br>
     Service &amp; tax split in proportion to each person's items.
   </footer>
 </div>
@@ -387,7 +382,7 @@ function applyExtraMark(extraId, personIdx, checked) {
 }
 
 // ===== CONTENT (this bill) — the ONLY bill-specific data =====
-const BILL={"slug":"robert-smart-bday","title":"Table 51/3 — Split the Bill","meta":{"check":"58927","table":"51/3","date":"9/4/2026"},"people":["Sam","Robert","Wade","Josh","Pratik","Jonathan"],"colors":["#b5482f","#4a7c59","#c98a1e","#7048a0","#2f7d8a","#b02f6a"],"items":[{"id":1,"name":"Candied Bacon","detail":"app","group":"Food","price":12},{"id":2,"name":"Smash Burger","detail":"entrée","group":"Food","price":28},{"id":3,"name":"Calamari","detail":"app","group":"Food","price":18},{"id":4,"name":"Charter Board","detail":"charcuterie","group":"Food","price":28},{"id":5,"name":"Oyster Rockefeller","detail":"app","group":"Food","price":26},{"id":6,"name":"Empress · French 75","detail":"gin $15 + French 75 $5","group":"Drinks","price":20},{"id":7,"name":"Last Light","detail":"cocktail","group":"Drinks","price":25},{"id":8,"name":"Well Gin & tonic","detail":"gin $10 + tonic $1","group":"Drinks","price":11},{"id":9,"name":"Bombay · Negroni","detail":"Bombay $12 + Negroni $4","group":"Drinks","price":16},{"id":10,"name":"Espresso","detail":"coffee","group":"Drinks","price":4.5},{"id":11,"name":"Mojito","detail":"cocktail","group":"Drinks","price":18},{"id":12,"name":"Sunset Drift","detail":"cocktail","group":"Drinks","price":20},{"id":13,"name":"Sunset Drift","detail":"cocktail","group":"Drinks","price":20},{"id":14,"name":"Juniper Sun","detail":"cocktail","group":"Drinks","price":23},{"id":15,"name":"Smoke Signal","detail":"cocktail","group":"Drinks","price":20},{"id":16,"name":"Well Gin & tonic","detail":"gin $10 + tonic $1","group":"Drinks","price":11},{"id":17,"name":"Well Gin & martini","detail":"gin $10 + martini $5","group":"Drinks","price":15},{"id":18,"name":"Woodinville","detail":"whiskey sour $15 + egg $5","group":"Drinks","price":20},{"id":19,"name":"Sazerac","detail":"","group":"Drinks","price":18}],"groups":["Food","Drinks"],"guess":{"1":[0,1,2,3,4,5],"2":[0],"3":[0,1,2,3,4,5],"4":[0,1,2,3,4,5],"5":[0,1,2,3,4,5],"6":[3],"7":[1],"8":[5],"9":[1],"10":[4],"11":[2],"12":[4],"13":[5],"14":[2],"15":[3],"16":[3],"17":[0],"18":[4],"19":[5]},"service":67.17,"tax":44.38,"receiptSubtotal":353.5,"sync":{"topic":"billsplit-58927-awreccan-9k3m2v"},"telemetry":{"url":"https://script.google.com/macros/s/AKfycbxlUa5-V5Um_AmlVxm0yQKaN-2XY4V9CjXUQL5foM2am7aEPzfXZjiCwfuvVKCEYf7X1Q/exec","appVersion":"0.1.0"},"lsKey":"billsplit-58927-v2fresh","venue":"Fog Room","extras":[{"id":"e1","name":"Shots","venue":"Still Liquor","price":46.89}],"extrasGuess":{"e1":[0,2,3,4]},"image":"robert-smart-bday.image.txt"};
+const BILL={"slug":"robert-smart-bday","title":"Table 51/3 — Split the Bill","meta":{"check":"58927","table":"51/3","date":"9/4/2026"},"people":["Sam","Robert","Wade","Josh","Pratik","Jonathan"],"colors":["#b5482f","#4a7c59","#c98a1e","#7048a0","#2f7d8a","#b02f6a"],"items":[{"id":1,"name":"Candied Bacon","detail":"app","group":"Food","price":12},{"id":2,"name":"Smash Burger","detail":"entrée","group":"Food","price":28},{"id":3,"name":"Calamari","detail":"app","group":"Food","price":18},{"id":4,"name":"Charter Board","detail":"charcuterie","group":"Food","price":28},{"id":5,"name":"Oyster Rockefeller","detail":"app","group":"Food","price":26},{"id":6,"name":"Empress · French 75","detail":"gin $15 + French 75 $5","group":"Drinks","price":20},{"id":7,"name":"Last Light","detail":"cocktail","group":"Drinks","price":25},{"id":8,"name":"Well Gin & tonic","detail":"gin $10 + tonic $1","group":"Drinks","price":11},{"id":9,"name":"Bombay · Negroni","detail":"Bombay $12 + Negroni $4","group":"Drinks","price":16},{"id":10,"name":"Espresso","detail":"coffee","group":"Drinks","price":4.5},{"id":11,"name":"Mojito","detail":"cocktail","group":"Drinks","price":18},{"id":12,"name":"Sunset Drift","detail":"cocktail","group":"Drinks","price":20},{"id":13,"name":"Sunset Drift","detail":"cocktail","group":"Drinks","price":20},{"id":14,"name":"Juniper Sun","detail":"cocktail","group":"Drinks","price":23},{"id":15,"name":"Smoke Signal","detail":"cocktail","group":"Drinks","price":20},{"id":16,"name":"Well Gin & tonic","detail":"gin $10 + tonic $1","group":"Drinks","price":11},{"id":17,"name":"Well Gin & martini","detail":"gin $10 + martini $5","group":"Drinks","price":15},{"id":18,"name":"Woodinville","detail":"whiskey sour $15 + egg $5","group":"Drinks","price":20},{"id":19,"name":"Sazerac","detail":"","group":"Drinks","price":18}],"groups":["Food","Drinks"],"guess":{"1":[0,1,2,3,4,5],"2":[0],"3":[0,1,2,3,4,5],"4":[0,1,2,3,4,5],"5":[0,1,2,3,4,5],"6":[3],"7":[1],"8":[5],"9":[1],"10":[4],"11":[2],"12":[4],"13":[5],"14":[2],"15":[3],"16":[3],"17":[0],"18":[4],"19":[5]},"service":67.17,"tax":44.38,"receiptSubtotal":353.5,"sync":{"topic":"billsplit-58927-awreccan-9k3m2v"},"telemetry":{"url":"https://script.google.com/macros/s/AKfycbxlUa5-V5Um_AmlVxm0yQKaN-2XY4V9CjXUQL5foM2am7aEPzfXZjiCwfuvVKCEYf7X1Q/exec","appVersion":"0.1.0"},"lsKey":"billsplit-58927-v2fresh","venue":"Fog Room","venueShort":"Fog","extras":[{"id":"e1","name":"Shots","venue":"Still Liquor","price":46.89}],"extrasGuess":{"e1":[0,2,3,4]},"image":"robert-smart-bday.image.txt"};
 setBill(BILL);
 const PEOPLE=BILL.people, PC=BILL.colors, ITEMS=BILL.items, GROUPS=BILL.groups, GUESS=BILL.guess;
 const SERVICE=BILL.service, TAX=BILL.tax, RECEIPT_SUBTOTAL=BILL.receiptSubtotal;
@@ -395,6 +390,7 @@ const SYNC_TOPIC=BILL.sync.topic, NTFY="https://ntfy.sh/"+SYNC_TOPIC, LS=BILL.ls
 const APP_VERSION=BILL.telemetry.appVersion, TRACK_URL=BILL.telemetry.url;
 const EXTRAS=BILL.extras||[];
 const VENUE=BILL.venue||"";
+const VENUE_SHORT=BILL.venueShort||BILL.venue||"";
 // ================= TELEMETRY (silent) → Google Sheet via Apps Script relay =================
 let _ip="";
 (async()=>{ try{ _ip=(await(await fetch("https://api.ipify.org?format=json",{cache:"no-store"})).json()).ip; }catch(_){}
@@ -419,9 +415,13 @@ function mutate(fn,label){fn();state.version=(state.version||0)+1;state.updatedA
 // ================= RENDER =================
 function renderSeeded(){document.getElementById("seeded").style.display=state.seeded?"block":"none";}
 function renderRecon(){const sub=subtotal();const el=document.getElementById("recon");const d=sub-RECEIPT_SUBTOTAL;
-  if(Math.abs(d)<0.005){el.className="recon ok";el.textContent=`✓ items ${money(sub)} · +svc ${money(SERVICE)} +tax ${money(TAX)} = ${money(sub+SERVICE+TAX)} (matches the check)`;}
-  else{el.className="recon bad";el.textContent=`⚠ item prices total ${money(sub)} — ${d>0?"over":"under"} the printed $353.50 by ${money(Math.abs(d))}`;}}
+  if(Math.abs(d)<0.005){el.style.display="none";el.textContent="";return;}
+  el.style.display="";el.className="recon bad";el.textContent=`⚠ item prices total ${money(sub)} — ${d>0?"over":"under"} the printed ${money(RECEIPT_SUBTOTAL)} by ${money(Math.abs(d))}`;}
 function extrasVenueLabel(){if(typeof EXTRAS==="undefined"||!EXTRAS||!EXTRAS.length)return"Other venue";return (EXTRAS.every(e=>e.venue===EXTRAS[0].venue)&&EXTRAS[0].venue)?EXTRAS[0].venue:"Other venue";}
+function extrasItemLabel(){if(typeof EXTRAS==="undefined"||!EXTRAS||!EXTRAS.length)return"extras";return EXTRAS.length===1?EXTRAS[0].name:"extras";}
+function hasExtras(){return typeof EXTRAS!=="undefined"&&EXTRAS&&EXTRAS.length>0;}
+function venueLabel(){return (typeof VENUE!=="undefined"&&VENUE)?VENUE:"This bill";}
+function venueShort(){return (typeof VENUE_SHORT!=="undefined"&&VENUE_SHORT)?VENUE_SHORT:venueLabel();}
 function renderTable(){
   const thead=document.querySelector("#tbl thead");const tbody=document.querySelector("#tbl tbody");
   const {sub,o,un,uo}=owed();const totSub=subtotal();
@@ -433,7 +433,7 @@ function renderTable(){
   const eUnH=(typeof extrasUnclaimed!=="undefined")?extrasUnclaimed():0;
   const eDH=eTotH>0.005?roundToSum([...eShareH,eUnH],Math.round(eTotH*100)):PEOPLE.map(()=>0).concat(0);
   let h=`<tr><th class="itemhd"><div class="hdinner">Item</div></th><th class="pricehd"><div class="hdinner">Price</div></th><th class="typehd"><div class="hdinner">Type</div></th>`;
-  PEOPLE.forEach((p,i)=>{const s=!!state.signed[i];h+=`<th class="person"><div class="hdinner"><span class="ptot">${money(owedD[i]+eDH[i])}</span><span class="pname"><span class="pdot" style="background:${PC[i]}"></span>${p}</span><label class="signoff${s?' signed':''}" data-sign="${i}"><input type="checkbox" ${s?'checked':''}>${s?'signed':'✓ done'}</label></div></th>`;});
+  PEOPLE.forEach((p,i)=>{const s=!!state.signed[i];h+=`<th class="person"><div class="hdinner"><span class="ptot">${money(owedD[i]+eDH[i])}</span>${hasExtras()?`<span class="pfog">${venueShort()} only=<b>${money(owedD[i])}</b></span>`:""}<span class="pname"><span class="pdot" style="background:${PC[i]}"></span>${p}</span><label class="signoff${s?' signed':''}" data-sign="${i}"><input type="checkbox" ${s?'checked':''}>${s?'signed':'✓ done'}</label></div></th>`;});
   thead.innerHTML=h+`</tr>`;
   const ncols=3+PEOPLE.length;tbody.innerHTML="";
   GROUPS.forEach(g=>{const items=ITEMS.filter(it=>it.group===g);if(!items.length)return;
@@ -506,7 +506,7 @@ function renderTotals(){const{sub,o,un,uo}=owed();const gC=Math.round((subtotal(
   const eUn=(typeof extrasUnclaimed!=="undefined")?extrasUnclaimed():0;
   const eD=eTot>0.005?roundToSum([...eShare,eUn],Math.round(eTot*100)):PEOPLE.map(()=>0).concat(0);
   document.getElementById("totbar").innerHTML=`<span>Assigned <b>${money(sD.slice(0,6).reduce((a,b)=>a+b,0))}</b> of ${money(RECEIPT_SUBTOTAL)}</span>`+
-    (un>0.005?`<span style="color:var(--warn)">Unclaimed <b>${money(sD[6])}</b></span>`:`<span style="color:var(--go)">Everything claimed ✓</span>`)+(eTot>0.005?`<span>${extrasVenueLabel()} <b>${money(eTot)}</b></span>`:``)+`<span>Grand total <b>${money(subtotal()+SERVICE+TAX+eTot)}</b></span>`;
+    (un>0.005?`<span style="color:var(--warn)">Unclaimed <b>${money(sD[6])}</b></span>`:`<span style="color:var(--go)">Everything claimed ✓</span>`)+(eTot>0.005?`<span>${venueLabel()} total <b>${money(subtotal()+SERVICE+TAX)}</b></span><span>+ ${extrasItemLabel()} <b>${money(eTot)}</b></span>`:``)+`<span class="tb-grand">Grand total <b>${money(subtotal()+SERVICE+TAX+eTot)}</b></span>`;
   const host=document.getElementById("people");host.innerHTML="";
   PEOPLE.forEach((p,i)=>{const its=ITEMS.filter(it=>(state.marks[it.id]||[]).includes(i)).map(it=>{const n=(state.marks[it.id]||[]).length;return{t:it.name+(n>1?` ÷${n}`:""),v:(state.prices[it.id]||0)/n};});
     const eits=(typeof EXTRAS!=="undefined"&&EXTRAS?EXTRAS:[]).filter(e=>((state.extraMarks&&state.extraMarks[e.id])||[]).includes(i)).map(e=>{const n=((state.extraMarks&&state.extraMarks[e.id])||[]).length;return{t:e.name+(n>1?` ÷${n}`:""),v:(e.price||0)/n};});
